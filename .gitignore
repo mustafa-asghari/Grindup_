@@ -48,5 +48,6 @@ venv/
 # Docker
 *.pid
 
-# Do not commit markdown files
+# Documentation
 *.md
+!/README.md
