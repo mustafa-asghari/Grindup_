@@ -1,0 +1,1438 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id                String  @id @default(uuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @map("refresh_token")
+  access_token      String? @map("access_token")
+  expires_at        Int?    @map("expires_at")
+  token_type        String? @map("token_type")
+  scope             String?
+  id_token          String? @map("id_token")
+  session_state     String? @map("session_state")
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model AuditLogs {
+  id          String   @id
+  adminId     String   @map("admin_id")
+  action      String
+  targetType  String?  @map("target_type")
+  targetId    String?  @map("target_id")
+  beforeState Json?    @map("before_state")
+  afterState  Json?    @map("after_state")
+  createdAt   DateTime @default(now()) @map("created_at")
+  user        User     @relation(fields: [adminId], references: [id])
+
+  @@map("audit_logs")
+}
+
+model Badges {
+  id          String       @id
+  name        String
+  description String?
+  iconUrl     String?      @map("icon_url")
+  criteria    Json?
+  userBadges  UserBadges[]
+
+  @@map("badges")
+}
+
+model CatchupQueues {
+  id                 String             @id
+  userId             String             @map("user_id")
+  homeworkId         String             @map("homework_id")
+  missedAt           DateTime           @map("missed_at")
+  priority           Int                @default(5)
+  rescheduledTo      DateTime?          @map("rescheduled_to")
+  completed          Boolean            @default(false)
+  homeworkAssignment HomeworkAssignment @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
+
+  @@map("catchup_queues")
+}
+
+model Certificates {
+  id               String   @id
+  userId           String   @map("user_id")
+  type             String
+  title            String
+  issuedAt         DateTime @default(now()) @map("issued_at")
+  verificationCode String   @unique @map("verification_code")
+
+  @@map("certificates")
+}
+
+model ConceptDriftAlerts {
+  id              String   @id
+  userId          String   @map("user_id")
+  topicId         String   @map("topic_id")
+  masteryBefore   Float    @map("mastery_before")
+  masteryCurrent  Float    @map("mastery_current")
+  driftPercentage Float    @map("drift_percentage")
+  alertedAt       DateTime @default(now()) @map("alerted_at")
+  user            User     @relation(fields: [userId], references: [id])
+
+  @@map("concept_drift_alerts")
+}
+
+model ContestIntegrityFlags {
+  id        String   @id
+  contestId String   @map("contest_id")
+  userId    String   @map("user_id")
+  flagType  String   @map("flag_type")
+  severity  String   @default("warning")
+  details   Json?
+  reviewed  Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("contest_integrity_flags")
+}
+
+model ContestProblems {
+  contestId String  @map("contest_id")
+  problemId String  @map("problem_id")
+  points    Int
+  order     Int
+  contest   Contest @relation(fields: [contestId], references: [id])
+  problem   Problem @relation(fields: [problemId], references: [id])
+
+  @@id([contestId, problemId])
+  @@map("contest_problems")
+}
+
+model ContestSubmission {
+  id             String     @id
+  contestId      String     @map("contest_id")
+  userId         String     @map("user_id")
+  problemId      String     @map("problem_id")
+  submissionId   String     @map("submission_id")
+  penaltyMinutes Int        @default(0) @map("penalty_minutes")
+  submittedAt    DateTime   @default(now()) @map("submitted_at")
+  contest        Contest    @relation(fields: [contestId], references: [id])
+  submission     Submission @relation(fields: [submissionId], references: [id])
+  user           User       @relation(fields: [userId], references: [id])
+
+  @@map("contest_submissions")
+}
+
+model ContestUpsolves {
+  id         String    @id
+  contestId  String    @map("contest_id")
+  userId     String    @map("user_id")
+  problemId  String    @map("problem_id")
+  unlockedAt DateTime  @default(now()) @map("unlocked_at")
+  solvedAt   DateTime? @map("solved_at")
+
+  @@map("contest_upsolves")
+}
+
+model Contest {
+  id                String              @id
+  title             String
+  startsAt          DateTime            @map("starts_at")
+  endsAt            DateTime            @map("ends_at")
+  isRated           Boolean             @default(true) @map("is_rated")
+  penaltyPerWrong   Int                 @default(5) @map("penalty_per_wrong")
+  contestProblems   ContestProblems[]
+  contestSubmission ContestSubmission[]
+  contestExercises  ContestExercise[]
+  participants      ContestParticipant[]
+  messages          ContestMessage[]
+  createdById       String?              @map("created_by_id")
+  createdBy         User?                @relation("CreatedContests", fields: [createdById], references: [id])
+
+  @@map("contests")
+}
+
+model ContestMessage {
+  id        String   @id @default(uuid())
+  contestId String   @map("contest_id")
+  userId    String   @map("user_id")
+  message   String
+  createdAt DateTime @default(now()) @map("created_at")
+  contest   Contest  @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("contest_messages")
+  @@index([contestId])
+}
+
+model ContestExercise {
+  contestId  String   @map("contest_id")
+  exerciseId String   @map("exercise_id")
+  points     Int
+  order      Int
+  contest    Contest  @relation(fields: [contestId], references: [id])
+  exercise   Exercise @relation(fields: [exerciseId], references: [id])
+
+  @@id([contestId, exerciseId])
+  @@map("contest_exercises")
+}
+
+model ContestParticipant {
+   id        String   @id @default(uuid())
+   contestId String   @map("contest_id")
+   userId    String   @map("user_id")
+   joinedAt  DateTime @default(now()) @map("joined_at")
+   contest   Contest  @relation(fields: [contestId], references: [id])
+   user      User     @relation(fields: [userId], references: [id])
+
+   @@unique([contestId, userId])
+   @@map("contest_participants")
+}
+
+enum ContestLobbyVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum ContestLobbyRole {
+  HOST
+  MEMBER
+}
+
+enum ContestLobbyMode {
+  LEETCODE_RACE
+  STUDY_TIME
+  EXERCISE_COUNT
+  XP_RACE
+  CUSTOM
+}
+
+enum ContestLobbyStatus {
+  WAITING
+  STARTED
+  FINISHED
+}
+
+model ContestLobby {
+  id              String                  @id
+  title           String
+  createdById     String                  @map("created_by_id")
+  visibility      ContestLobbyVisibility  @default(PUBLIC)
+  mode            ContestLobbyMode        @default(CUSTOM)
+  targetValue     Int?
+  
+  status          ContestLobbyStatus      @default(WAITING)
+  durationMinutes Int?                    @map("duration_minutes")
+  startedAt       DateTime?               @map("started_at")
+  endedAt         DateTime?               @map("ended_at")
+  winnerId        String?                 @map("winner_id")
+  results         Json?
+
+  passwordHash    String?                 @map("password_hash")
+  isActive        Boolean                 @default(true) @map("is_active")
+  createdAt       DateTime                @default(now()) @map("created_at")
+  participants    ContestLobbyParticipant[]
+  messages        ContestLobbyMessage[]
+
+  @@map("contest_lobbies")
+}
+
+model ContestLobbyParticipant {
+  id        String           @id
+  lobbyId   String           @map("lobby_id")
+  userId    String           @map("user_id")
+  role      ContestLobbyRole @default(MEMBER)
+  joinedAt  DateTime         @default(now()) @map("joined_at")
+  lobby     ContestLobby     @relation(fields: [lobbyId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([lobbyId, userId])
+  @@map("contest_lobby_participants")
+}
+
+model ContestLobbyMessage {
+  id        String       @id @default(uuid())
+  lobbyId   String       @map("lobby_id")
+  userId    String       @map("user_id")
+  message   String
+  createdAt DateTime     @default(now()) @map("created_at")
+  lobby     ContestLobby @relation(fields: [lobbyId], references: [id], onDelete: Cascade)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("contest_lobby_messages")
+  @@index([lobbyId])
+}
+
+model DailySnapshots {
+  id                 String   @id
+  userId             String   @map("user_id")
+  date               DateTime @db.Date
+  problemsSolved     Int      @default(0) @map("problems_solved")
+  exercisesCompleted Int      @default(0) @map("exercises_completed")
+  reviewsCompleted   Int      @default(0) @map("reviews_completed")
+  minutesStudied     Int      @default(0) @map("minutes_studied")
+  xpEarned           Int      @default(0) @map("xp_earned")
+  streakMaintained   Boolean  @default(false) @map("streak_maintained")
+
+  @@unique([userId, date])
+  @@index([userId, date])
+  @@map("daily_snapshots")
+}
+
+model DiagnosticQuestions {
+  id          String   @id
+  track       String
+  prompt      String
+  topicName   String
+  maxScore    Int      @default(10) @map("max_score")
+  createdAt   DateTime @default(now()) @map("created_at")
+  createdByAi Boolean  @default(true) @map("created_by_ai")
+  version     Int      @default(1)
+
+  @@index([track])
+  @@map("diagnostic_questions")
+}
+
+model Editorials {
+  id              String  @id
+  problemId       String  @map("problem_id")
+  content         String
+  timeComplexity  String? @map("time_complexity")
+  spaceComplexity String? @map("space_complexity")
+  commonMistakes  Json?   @map("common_mistakes")
+  problem         Problem @relation(fields: [problemId], references: [id])
+
+  @@map("editorials")
+}
+
+model Events {
+  id            String   @id
+  userId        String   @map("user_id")
+  eventType     String   @map("event_type")
+  payload       Json
+  correlationId String?  @map("correlation_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+  user          User     @relation(fields: [userId], references: [id])
+
+  @@map("events")
+}
+
+model ExerciseAttempt {
+  id            String   @id
+  userId        String   @map("user_id")
+  exerciseId    String   @map("exercise_id")
+  response      Json
+  isCorrect     Boolean? @map("is_correct")
+  score         Float?
+  feedback      String?
+  timeSpentSecs Int?     @map("time_spent_secs")
+  hintsUsed     Int      @default(0) @map("hints_used")
+  attemptNumber Int      @default(1) @map("attempt_number")
+  createdAt     DateTime @default(now()) @map("created_at")
+  exercise      Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("exercise_attempts")
+}
+
+model ExerciseHints {
+  id         String   @id
+  exerciseId String   @map("exercise_id")
+  level      Int
+  content    String
+  exercise   Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+
+  @@unique([exerciseId, level])
+  @@map("exercise_hints")
+}
+
+model Exercise {
+  id              String            @id
+  subjectId       String            @map("subject_id")
+  topicId         String?           @map("topic_id")
+  type            ExerciseType
+  title           String
+  content         Json
+  difficulty      Difficulty
+  points          Int               @default(10)
+  estimatedMins   Int?              @map("estimated_mins")
+  tags            String[]          @default([])
+  version         Int               @default(1)
+  isActive        Boolean           @default(true) @map("is_active")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @map("updated_at")
+  exerciseAttempts ExerciseAttempt[]
+  exerciseHints   ExerciseHints[]
+  contestExercises ContestExercise[]
+  subject         Subject           @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  topic           SubjectTopic?     @relation(fields: [topicId], references: [id])
+
+  @@map("exercises")
+}
+
+model FailbackLogs {
+  id         String   @id
+  service    String
+  fallbackTo String   @map("fallback_to")
+  reason     String?
+  userId     String?  @map("user_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("failback_logs")
+}
+
+model GraduationInterviews {
+  id             String    @id
+  userId         String    @map("user_id")
+  roadmapId      String?   @map("roadmap_id")
+  startedAt      DateTime? @map("started_at")
+  completedAt    DateTime? @map("completed_at")
+  scores         Json?
+  totalScore     Float?    @map("total_score")
+  result         String?
+  feedback       Json?
+  integrityFlags Json?     @map("integrity_flags")
+  integrityScore Float?    @map("integrity_score")
+  transcript     Json?
+  certificateId  String?   @map("certificate_id")
+
+  @@map("graduation_interviews")
+}
+
+model HintLadders {
+  id        String  @id
+  problemId String  @map("problem_id")
+  level     Int
+  content   String
+  problem   Problem @relation(fields: [problemId], references: [id])
+
+  @@unique([problemId, level])
+  @@map("hint_ladders")
+}
+
+model HomeworkAssignment {
+  id                  String                @id
+  userId              String                @map("user_id")
+  roadmapId           String?               @map("roadmap_id")
+  topicId             String?               @map("topic_id")
+  title               String
+  dueDate             DateTime              @map("due_date")
+  isCompleted         Boolean               @default(false) @map("is_completed")
+  completedAt         DateTime?             @map("completed_at")
+  createdAt           DateTime              @default(now()) @map("created_at")
+  assignmentType      String                @default("general") @map("assignment_type")
+  description         String?
+  effectiveXpEarned   Int                   @default(0) @map("effective_xp_earned")
+  estimatedMins       Int                   @default(30) @map("estimated_mins")
+  lateDays            Int                   @default(0) @map("late_days")
+  relatedExerciseId   String?               @map("related_exercise_id")
+  subjectId           String?               @map("subject_id")
+  xpReward            Int                   @default(50) @map("xp_reward")
+  catchupQueues       CatchupQueues[]
+  subject             Subject?              @relation(fields: [subjectId], references: [id])
+  topic               SubjectTopic?         @relation(fields: [topicId], references: [id])
+  homeworkReminders   HomeworkReminders[]
+  homeworkSubmissions HomeworkSubmissions[]
+  latePenalties       LatePenalties[]
+
+  @@map("homework_assignments")
+}
+
+model HomeworkReminders {
+  id                 String             @id
+  homeworkId         String             @map("homework_id")
+  reminderType       String             @map("reminder_type")
+  scheduledFor       DateTime           @map("scheduled_for")
+  sent               Boolean            @default(false)
+  sentAt             DateTime?          @map("sent_at")
+  homeworkAssignment HomeworkAssignment @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
+
+  @@map("homework_reminders")
+}
+
+model HomeworkSubmissions {
+  id                 String             @id
+  homeworkId         String             @map("homework_id")
+  userId             String             @map("user_id")
+  submissionType     String             @map("submission_type")
+  fileName           String?            @map("file_name")
+  fileType           String?            @map("file_type")
+  content            String?
+  fileUrl            String?            @map("file_url")
+  aiFeedback         String?            @map("ai_feedback")
+  aiScore            Float?             @map("ai_score")
+  isGraded           Boolean            @default(false) @map("is_graded")
+  gradedAt           DateTime?          @map("graded_at")
+  submittedAt        DateTime           @default(now()) @map("submitted_at")
+  homeworkAssignment HomeworkAssignment @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
+
+  @@map("homework_submissions")
+}
+
+model LatePenalties {
+  id                 String             @id
+  userId             String             @map("user_id")
+  homeworkId         String             @map("homework_id")
+  penaltyType        String             @map("penalty_type")
+  severity           String             @default("light")
+  applied            Boolean            @default(false)
+  appliedAt          DateTime?          @map("applied_at")
+  expiresAt          DateTime?          @map("expires_at")
+  daysLate           Int                @default(0) @map("days_late")
+  effectiveXp        Int                @default(0) @map("effective_xp")
+  originalXp         Int                @default(0) @map("original_xp")
+  penaltyPercent     Int                @default(0) @map("penalty_percent")
+  homeworkAssignment HomeworkAssignment @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
+
+  @@map("late_penalties")
+}
+
+model LeaderboardSnapshots {
+  id        String   @id
+  type      String
+  rankings  Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("leaderboard_snapshots")
+}
+
+model LearningContracts {
+  id                    String    @id
+  userId                String    @map("user_id")
+  signedAt              DateTime  @default(now()) @map("signed_at")
+  complianceRate        Float     @default(100) @map("compliance_rate")
+  goals                 Json      @default("[]")
+  isActive              Boolean   @default(true) @map("is_active")
+  subjectId             String    @map("subject_id")
+  targetCompletionDate  DateTime? @map("target_completion_date")
+  weeklyHoursCommitment Int       @map("weekly_hours_commitment")
+  weeksCompliant        Int       @default(0) @map("weeks_compliant")
+  subject               Subject   @relation(fields: [subjectId], references: [id])
+  user                  User      @relation(fields: [userId], references: [id])
+
+  @@map("learning_contracts")
+}
+
+model LearningMilestones {
+  id            String   @id
+  userId        String   @map("user_id")
+  milestoneType String   @map("milestone_type")
+  topicId       String?  @map("topic_id")
+  description   String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  topic         Topic?   @relation(fields: [topicId], references: [id])
+  user          User     @relation(fields: [userId], references: [id])
+
+  @@map("learning_milestones")
+}
+
+model LessonExercises {
+  id       String  @id
+  lessonId String  @map("lesson_id")
+  type     String
+  refId    String? @map("ref_id")
+  order    Int
+  lessons  Lessons @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@map("lesson_exercises")
+}
+
+model Lessons {
+  id              String            @id
+  moduleId        String            @map("module_id")
+  title           String
+  content         String
+  order           Int
+  lessonExercises LessonExercises[]
+  modules         Modules           @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@map("lessons")
+}
+
+model MistakeCards {
+  id               String      @id
+  userId           String      @map("user_id")
+  submissionId     String?     @map("submission_id")
+  mistakeTag       String      @map("mistake_tag")
+  category         String
+  description      String?
+  correctedConcept String?     @map("corrected_concept")
+  occurrenceCount  Int         @default(1) @map("occurrence_count")
+  lastOccurred     DateTime    @default(now()) @map("last_occurred")
+  mastered         Boolean     @default(false)
+  submission       Submission? @relation(fields: [submissionId], references: [id])
+  user             User        @relation(fields: [userId], references: [id])
+
+  @@map("mistake_cards")
+}
+
+model MistakeClosures {
+  id            String   @id
+  mistakeCardId String   @map("mistake_card_id")
+  userId        String   @map("user_id")
+  closureType   String   @map("closure_type")
+  closureNote   String?  @map("closure_note")
+  thenCode      String?  @map("then_code")
+  nowCode       String?  @map("now_code")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("mistake_closures")
+}
+
+model MistakeReplays {
+  id              String   @id
+  mistakeCardId   String   @map("mistake_card_id")
+  userId          String   @map("user_id")
+  replayedAt      DateTime @default(now()) @map("replayed_at")
+  newSubmissionId String?  @map("new_submission_id")
+  wasSuccessful   Boolean  @default(false) @map("was_successful")
+
+  @@map("mistake_replays")
+}
+
+model Modules {
+  id             String    @id
+  roadmapId      String    @map("roadmap_id")
+  title          String
+  order          Int
+  passConditions Json?     @map("pass_conditions")
+  lessons        Lessons[]
+  roadmaps       Roadmaps  @relation(fields: [roadmapId], references: [id], onDelete: Cascade)
+
+  @@map("modules")
+}
+
+model OnboardingProfile {
+  id                   String           @id @default(uuid())
+  userId               String           @unique @map("user_id")
+  status               OnboardingStatus @default(incomplete)
+  track                String?
+  goal                 String?
+  hoursPerWeek         Int?             @map("hours_per_week")
+  deadline             DateTime?
+  difficultyPreference String?          @map("difficulty_preference")
+  learningStyle        String?          @map("learning_style")
+  aiPersona            String?          @map("ai_persona")
+  diagnosticResponses  Json?
+  baselineMastery      Json?            @map("baseline_mastery")
+  createdAt            DateTime         @default(now()) @map("created_at")
+  updatedAt            DateTime         @map("updated_at")
+  user                 User             @relation(fields: [userId], references: [id])
+
+  @@map("onboarding_profiles")
+}
+
+model PersonalBests {
+  id         String   @id
+  userId     String   @map("user_id")
+  category   String
+  problemId  String?  @map("problem_id")
+  value      Int
+  achievedAt DateTime @default(now()) @map("achieved_at")
+  problem    Problem? @relation(fields: [problemId], references: [id])
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@map("personal_bests")
+}
+
+model PlateauAlerts {
+  id            String   @id
+  userId        String   @map("user_id")
+  topicId       String?  @map("topic_id")
+  alertType     String   @map("alert_type")
+  severity      String   @default("medium")
+  details       Json?
+  strategyShift String?  @map("strategy_shift")
+  acknowledged  Boolean  @default(false)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([userId, acknowledged])
+  @@map("plateau_alerts")
+}
+
+model PlatformHealth {
+  id         String   @id
+  service    String   @unique
+  status     String   @default("healthy")
+  lastCheck  DateTime @default(now()) @map("last_check")
+  errorCount Int      @default(0) @map("error_count")
+  message    String?
+
+  @@map("platform_health")
+}
+
+model ProblemReports {
+  id        String   @id
+  userId    String?  @map("user_id")
+  problemId String   @map("problem_id")
+  reason    String
+  details   String?
+  status    String   @default("open")
+  createdAt DateTime @default(now()) @map("created_at")
+  problem   Problem  @relation(fields: [problemId], references: [id])
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@map("problem_reports")
+}
+
+model ProblemScratchpads {
+  id        String   @id
+  userId    String   @map("user_id")
+  problemId String   @map("problem_id")
+  notes     String   @default("")
+  approach  String   @default("")
+  updatedAt DateTime @map("updated_at")
+
+  @@unique([userId, problemId])
+  @@map("problem_scratchpads")
+}
+
+model ProblemSelections {
+  id         String   @id
+  userId     String   @map("user_id")
+  problemId  String   @map("problem_id")
+  reasons    Json
+  selectedAt DateTime @default(now()) @map("selected_at")
+
+  @@map("problem_selections")
+}
+
+model ProblemTopic {
+  problemId String  @map("problem_id")
+  topicId   String  @map("topic_id")
+  problem   Problem @relation(fields: [problemId], references: [id])
+  topic     Topic   @relation(fields: [topicId], references: [id])
+
+  @@id([problemId, topicId])
+  @@map("problem_topics")
+}
+
+model ProblemVersions {
+  id                  String   @id
+  problemId           String   @map("problem_id")
+  version             Int
+  descriptionSnapshot String?  @map("description_snapshot")
+  createdAt           DateTime @default(now()) @map("created_at")
+  problem             Problem  @relation(fields: [problemId], references: [id])
+
+  @@map("problem_versions")
+}
+
+model Problem {
+  id              String            @id
+  title           String
+  description     String
+  difficulty      Difficulty
+  status          ProblemStatus     @default(active)
+  trustLabel      TrustLabel        @default(ai_validated) @map("trust_label")
+  timeLimitMs     Int               @default(2000) @map("time_limit_ms")
+  memoryLimitKb   Int               @default(256000) @map("memory_limit_kb")
+  constraints     Json?
+  version         Int               @default(1)
+  createdAt       DateTime          @default(now()) @map("created_at")
+  contestProblems ContestProblems[]
+  editorials      Editorials[]
+  hintLadders     HintLadders[]
+  personalBests   PersonalBests[]
+  problemReports  ProblemReports[]
+  topics          ProblemTopic[]
+  problemVersions ProblemVersions[]
+  starterTasks    StarterTasks[]
+  submissions     Submission[]
+  testCases       TestCases[]
+
+  @@map("problems")
+}
+
+model Purchases {
+  id              String   @id
+  userId          String   @map("user_id")
+  trackId         String   @map("track_id")
+  amountCents     Int      @map("amount_cents")
+  paymentProvider String   @map("payment_provider")
+  paymentId       String   @map("payment_id")
+  purchasedAt     DateTime @default(now()) @map("purchased_at")
+  tracks          Tracks   @relation(fields: [trackId], references: [id])
+
+  @@map("purchases")
+}
+
+model RateLimitLogs {
+  id          String   @id
+  userId      String   @map("user_id")
+  action      String
+  count       Int      @default(1)
+  windowStart DateTime @default(now()) @map("window_start")
+
+  @@unique([userId, action, windowStart])
+  @@index([userId, action])
+  @@map("rate_limit_logs")
+}
+
+model RetakeCredits {
+  id          String   @id
+  userId      String   @map("user_id")
+  type        String
+  credits     Int      @default(0)
+  purchasedAt DateTime @default(now()) @map("purchased_at")
+
+  @@map("retake_credits")
+}
+
+model ReviewCards {
+  id           String   @id
+  userId       String   @map("user_id")
+  topicId      String?  @map("topic_id")
+  cardType     CardType @map("card_type")
+  content      Json?
+  easeFactor   Float    @default(2.5) @map("ease_factor")
+  intervalDays Int      @default(1) @map("interval_days")
+  repetitions  Int      @default(0)
+  nextReview   DateTime @default(now()) @map("next_review")
+  createdAt    DateTime @default(now()) @map("created_at")
+  topic        Topic?   @relation(fields: [topicId], references: [id])
+  user         User     @relation(fields: [userId], references: [id])
+
+  @@map("review_cards")
+}
+
+model Roadmaps {
+  id           String    @id @default(uuid())
+  userId       String    @map("user_id")
+  goal         String
+  preferences  Json?
+  hoursPerWeek Int       @map("hours_per_week")
+  deadline     DateTime?
+  isActive     Boolean   @default(true) @map("is_active")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  modules      Modules[]
+
+  @@map("roadmaps")
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model StarterTasks {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  problemId String   @map("problem_id")
+  status    String   @default("pending")
+  createdAt DateTime @default(now()) @map("created_at")
+  problem   Problem  @relation(fields: [problemId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, problemId])
+  @@map("starter_tasks")
+}
+
+model StreakBonuses {
+  id         String   @id
+  userId     String   @map("user_id")
+  streakDays Int      @map("streak_days")
+  multiplier Float    @default(1.0)
+  bonusXp    Int      @default(0) @map("bonus_xp")
+  awardedAt  DateTime @default(now()) @map("awarded_at")
+
+  @@map("streak_bonuses")
+}
+
+model SubjectRoadmaps {
+  id          String   @id
+  subjectId   String   @map("subject_id")
+  name        String
+  description String?
+  isDefault   Boolean  @default(false) @map("is_default")
+  modules     Json
+  createdAt   DateTime @default(now()) @map("created_at")
+  subject     Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@map("subject_roadmaps")
+}
+
+model SubjectTopicPrerequisites {
+  id                                                                  String       @id
+  topicId                                                             String       @map("topic_id")
+  requiresTopicId                                                     String       @map("requires_topic_id")
+  subjectTopicSubjectTopicPrerequisitesRequiresTopicIdtosubjectTopics SubjectTopic @relation("subject_topic_prerequisites_requires_topic_idTosubject_topics", fields: [requiresTopicId], references: [id], onDelete: Cascade)
+  subjectTopicSubjectTopicPrerequisitesTopicIdtosubjectTopics         SubjectTopic @relation("subject_topic_prerequisites_topic_idTosubject_topics", fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@unique([topicId, requiresTopicId])
+  @@map("subject_topic_prerequisites")
+}
+
+model SubjectTopic {
+  id                                                                               String                      @id @default(uuid())
+  subjectId                                                                        String                      @map("subject_id")
+  name                                                                             String
+  slug                                                                             String
+  description                                                                      String?
+  parentId                                                                         String?                     @map("parent_id")
+  level                                                                            Int                         @default(0)
+  order                                                                            Int                         @default(0)
+  icon                                                                             String?
+  estimatedMins                                                                    Int?                        @map("estimated_mins")
+  content                                                                          String?
+  exercise                                                                         Exercise[]
+  subjectTopicPrerequisitesSubjectTopicPrerequisitesRequiresTopicIdtosubjectTopics SubjectTopicPrerequisites[] @relation("subject_topic_prerequisites_requires_topic_idTosubject_topics")
+  subjectTopicPrerequisitesSubjectTopicPrerequisitesTopicIdtosubjectTopics         SubjectTopicPrerequisites[] @relation("subject_topic_prerequisites_topic_idTosubject_topics")
+  subjectTopic                                                                     SubjectTopic?               @relation("subject_topicsTosubject_topics", fields: [parentId], references: [id])
+  otherSubjecttopic                                                                SubjectTopic[]              @relation("subject_topicsTosubject_topics")
+  subject                                                                          Subject                     @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  userTopicProgress                                                                UserTopicProgress[]
+  homeworkAssignments                                                              HomeworkAssignment[]
+
+  @@unique([subjectId, slug])
+  @@map("subject_topics")
+}
+
+model SubjectVectors {
+  id        String   @id @default(uuid())
+  subjectId String   @map("subject_id")
+  content   String
+  embedding Float[]
+  createdAt DateTime @default(now()) @map("created_at")
+  subject   Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@map("subject_vectors")
+}
+
+model Subject {
+  id                 String               @id @default(uuid())
+  name               String               @unique
+  slug               String               @unique
+  description        String?
+  icon               String?
+  color              String?
+  category           SubjectCategory
+  exerciseTypes      ExerciseType[]
+  estimatedHours     Int?                 @map("estimated_hours")
+  difficultyLevel    String?              @map("difficulty_level")
+  isActive           Boolean              @default(true) @map("is_active")
+  sourceContent      String?              @map("source_content")
+  sourceType         String?              @map("source_type")
+  sourceUrl          String?              @map("source_url")
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
+  exercises          Exercise[]
+  homeworkAssignments HomeworkAssignment[]
+  learningContracts  LearningContracts[]
+  subjectRoadmaps    SubjectRoadmaps[]
+  topics             SubjectTopic[]
+  subjectVectors     SubjectVectors[]
+  userSubjects       UserSubject[]
+
+  @@map("subjects")
+}
+
+model SubmissionJobs {
+  id           String    @id
+  userId       String    @map("user_id")
+  problemId    String    @map("problem_id")
+  code         String
+  language     String
+  status       String    @default("queued")
+  result       Json?
+  errorMessage String?   @map("error_message")
+  priority     Int       @default(5)
+  attempts     Int       @default(0)
+  maxAttempts  Int       @default(3) @map("max_attempts")
+  queuedAt     DateTime  @default(now()) @map("queued_at")
+  startedAt    DateTime? @map("started_at")
+  completedAt  DateTime? @map("completed_at")
+
+  @@index([status, queuedAt])
+  @@index([userId, status])
+  @@map("submission_jobs")
+}
+
+model Submission {
+  id                 String              @id
+  userId             String              @map("user_id")
+  problemId          String              @map("problem_id")
+  problemVersion     Int                 @map("problem_version")
+  code               String
+  language           String
+  status             SubmissionStatus
+  runtimeMs          Int?                @map("runtime_ms")
+  memoryKb           Int?                @map("memory_kb")
+  testResults        Json?               @map("test_results")
+  correlationId      String              @map("correlation_id")
+  submittedAt        DateTime            @default(now()) @map("submitted_at")
+  contestSubmissions ContestSubmission[]
+  mistakeCards       MistakeCards[]
+  problem            Problem             @relation(fields: [problemId], references: [id])
+  user               User                @relation(fields: [userId], references: [id])
+
+  @@map("submissions")
+}
+
+model TestCases {
+  id             String  @id
+  problemId      String  @map("problem_id")
+  input          String
+  expectedOutput String  @map("expected_output")
+  isHidden       Boolean @default(false) @map("is_hidden")
+  version        Int     @default(1)
+  order          Int
+  problem        Problem @relation(fields: [problemId], references: [id])
+
+  @@map("test_cases")
+}
+
+model ThinkingSessions {
+  id        String    @id
+  userId    String    @map("user_id")
+  problemId String    @map("problem_id")
+  startedAt DateTime  @default(now()) @map("started_at")
+  duration  Int
+  endedAt   DateTime? @map("ended_at")
+  notes     String?
+  completed Boolean   @default(false)
+
+  @@map("thinking_sessions")
+}
+
+model TopicPrerequisites {
+  id                                             String @id
+  topicId                                        String @map("topic_id")
+  requiresTopicId                                String @map("requires_topic_id")
+  topicTopicPrerequisitesRequiresTopicIdtotopics Topic  @relation("topic_prerequisites_requires_topic_idTotopics", fields: [requiresTopicId], references: [id])
+  topicTopicPrerequisitesTopicIdtotopics         Topic  @relation("topic_prerequisites_topic_idTotopics", fields: [topicId], references: [id])
+
+  @@unique([topicId, requiresTopicId])
+  @@map("topic_prerequisites")
+}
+
+model Topic {
+  id                                                          String               @id
+  name                                                        String               @unique
+  parentId                                                    String?              @map("parent_id")
+  level                                                       TopicLevel
+  learningMilestones                                          LearningMilestones[]
+  problemTopic                                                ProblemTopic[]
+  reviewCards                                                 ReviewCards[]
+  topicPrerequisitesTopicPrerequisitesRequiresTopicIdtotopics TopicPrerequisites[] @relation("topic_prerequisites_requires_topic_idTotopics")
+  topicPrerequisitesTopicPrerequisitesTopicIdtotopics         TopicPrerequisites[] @relation("topic_prerequisites_topic_idTotopics")
+  topic                                                       Topic?               @relation("topicsTotopics", fields: [parentId], references: [id])
+  otherTopic                                                  Topic[]              @relation("topicsTotopics")
+  userKnowledgeGraph                                          UserKnowledgeGraph[]
+
+  @@map("topics")
+}
+
+model Tracks {
+  id                String      @id
+  title             String
+  description       String?
+  priceCents        Int         @default(0) @map("price_cents")
+  currency          String      @default("USD")
+  roadmapTemplate   Json        @map("roadmap_template")
+  includesInterview Boolean     @default(true) @map("includes_interview")
+  isPublished       Boolean     @default(false) @map("is_published")
+  createdAt         DateTime    @default(now()) @map("created_at")
+  purchases         Purchases[]
+
+  @@map("tracks")
+}
+
+model TutorFallbacks {
+  id         String   @id
+  sessionId  String?  @map("session_id")
+  reason     String
+  fallbackTo String   @map("fallback_to")
+  userId     String   @map("user_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("tutor_fallbacks")
+}
+
+model TutorMessages {
+  id            String        @id
+  sessionId     String        @map("session_id")
+  role          String
+  content       String
+  metadata      Json?
+  createdAt     DateTime      @default(now()) @map("created_at")
+  tutorSessions TutorSessions @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("tutor_messages")
+}
+
+model TutorSessions {
+  id               String          @id
+  userId           String          @map("user_id")
+  problemId        String?         @map("problem_id")
+  exerciseId       String?         @map("exercise_id")
+  sessionType      String          @map("session_type")
+  mode             String          @default("normal")
+  messagesCount    Int             @default(0) @map("messages_count")
+  hintsGiven       Int             @default(0) @map("hints_given")
+  maxHintsAllowed  Int             @default(3) @map("max_hints_allowed")
+  solutionRevealed Boolean         @default(false) @map("solution_revealed")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  tutorMessages    TutorMessages[]
+
+  @@map("tutor_sessions")
+}
+
+model UserActivities {
+  id           String   @id
+  userId       String   @map("user_id")
+  activityType String   @map("activity_type")
+  refId        String?  @map("ref_id")
+  date         DateTime @default(now())
+  duration     Int?
+  metadata     Json?
+
+  @@index([userId, activityType])
+  @@index([userId, date])
+  @@map("user_activities")
+}
+
+model UserBadges {
+  userId    String   @map("user_id")
+  badgeId   String   @map("badge_id")
+  awardedAt DateTime @default(now()) @map("awarded_at")
+  badges    Badges   @relation(fields: [badgeId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@id([userId, badgeId])
+  @@map("user_badges")
+}
+
+model UserKnowledgeGraph {
+  id           String    @id
+  userId       String    @map("user_id")
+  topicId      String    @map("topic_id")
+  status       String
+  confidence   Float
+  lastAssessed DateTime? @map("last_assessed")
+  topic        Topic     @relation(fields: [topicId], references: [id])
+  user         User      @relation(fields: [userId], references: [id])
+
+  @@map("user_knowledge_graph")
+}
+
+model UserSubject {
+  id                 String    @id @default(uuid())
+  userId             String    @map("user_id")
+  subjectId          String    @map("subject_id")
+  enrolledAt         DateTime  @default(now()) @map("enrolled_at")
+  lastAccessedAt     DateTime  @default(now()) @map("last_accessed_at")
+  status             String    @default("active")
+  progressPercent    Float     @default(0) @map("progress_percent")
+  xpEarned           Int       @default(0) @map("xp_earned")
+  streak             Int       @default(0)
+  totalTimeSpent     Int       @default(0) @map("total_time_spent")
+  exercisesCompleted Int       @default(0) @map("exercises_completed")
+  goalHoursPerWeek   Int?      @map("goal_hours_per_week")
+  targetDeadline     DateTime? @map("target_deadline")
+  subject            Subject   @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, subjectId])
+  @@map("user_subjects")
+}
+
+model UserTopicProgress {
+  id                 String       @id
+  userId             String       @map("user_id")
+  topicId            String       @map("topic_id")
+  masteryPercent     Float        @default(0) @map("mastery_percent")
+  exercisesCompleted Int          @default(0) @map("exercises_completed")
+  exercisesTotal     Int          @default(0) @map("exercises_total")
+  lastPracticed      DateTime?    @map("last_practiced")
+  status             String       @default("not_started")
+  subjectTopic       SubjectTopic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  user               User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, topicId])
+  @@map("user_topic_progress")
+}
+
+model User {
+  id                 String               @id @default(uuid())
+  email              String               @unique
+  emailVerified      DateTime?            @map("email_verified")
+  passwordHash       String?              @map("password_hash")
+  username           String?              @unique
+  name               String?
+  image              String?              @map("avatar_url")
+  xp                 Int                  @default(20)
+  skillRating        Int                  @default(1000) @map("skill_rating")
+  currentStreak      Int                  @default(0) @map("current_streak")
+  level              Int                  @default(1)
+  dailyRunQuota      Int                  @default(50) @map("daily_run_quota")
+  contestMessages    ContestMessage[]
+
+  runsToday          Int                  @default(0) @map("runs_today")
+  twofaEnabled       Boolean              @default(false) @map("twofa_enabled")
+  twofaSecret        String?              @map("twofa_secret")
+  backupCodes        Json?                @map("backup_codes")
+  lastLogin          DateTime?            @map("last_login")
+  loginAttempts      Int                  @default(0) @map("login_attempts")
+  lockedUntil        DateTime?            @map("locked_until")
+  createdAt          DateTime             @default(now()) @map("created_at")
+  accounts           Account[]
+  auditLogs          AuditLogs[]
+  conceptDriftAlerts ConceptDriftAlerts[]
+  contestSubmissions ContestSubmission[]
+  events             Events[]
+  exerciseAttempts   ExerciseAttempt[]
+  learningContracts  LearningContracts[]
+  learningMilestones LearningMilestones[]
+  mistakeCards       MistakeCards[]
+  onboardingProfile  OnboardingProfile?
+  personalBests      PersonalBests[]
+  problemReports     ProblemReports[]
+  reviewCards        ReviewCards[]
+  sessions           Session[]
+  starterTasks       StarterTasks[]
+  submissions        Submission[]
+  userBadges         UserBadges[]
+  userKnowledgeGraph UserKnowledgeGraph[]
+  userSubjects       UserSubject[]
+  userTopicProgress  UserTopicProgress[]
+  xpTransactions     XpTransactions[]
+
+  // Social Relations
+  sentFriendRequests     Friendship[]      @relation("FriendshipRequester")
+  receivedFriendRequests Friendship[]      @relation("FriendshipAddressee")
+  sentMessages           DirectMessage[]   @relation("MessagesSent")
+  receivedMessages       DirectMessage[]   @relation("MessagesReceived")
+  sentChallenges         StudyChallenge[]  @relation("ChallengesSent")
+  receivedChallenges     StudyChallenge[]  @relation("ChallengesReceived")
+  wonChallenges          StudyChallenge[]  @relation("ChallengesWon")
+  contestLobbyMembership ContestLobbyParticipant[]
+  createdContests        Contest[]                @relation("CreatedContests")
+  contestParticipations  ContestParticipant[]
+  contestLobbyMessages   ContestLobbyMessage[]
+
+  @@map("users")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model WeeklyLearningReports {
+  id                 String   @id
+  userId             String   @map("user_id")
+  weekStart          DateTime @map("week_start") @db.Date
+  weekEnd            DateTime @map("week_end") @db.Date
+  totalMinutes       Int      @default(0) @map("total_minutes")
+  problemsSolved     Int      @default(0) @map("problems_solved")
+  exercisesCompleted Int      @default(0) @map("exercises_completed")
+  topicsImproved     Json?    @map("topics_improved")
+  weakAreas          Json?    @map("weak_areas")
+  recommendations    Json?
+  metaInsights       String?  @map("meta_insights")
+  generatedAt        DateTime @default(now()) @map("generated_at")
+
+  @@unique([userId, weekStart])
+  @@map("weekly_learning_reports")
+}
+
+model WellbeingChecks {
+  id         String   @id
+  userId     String   @map("user_id")
+  checkType  String   @map("check_type")
+  score      Float
+  indicators Json?
+  action     String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("wellbeing_checks")
+}
+
+model XpTransactions {
+  id        String   @id
+  userId    String   @map("user_id")
+  amount    Int
+  reason    String
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@map("xp_transactions")
+}
+
+enum CardType {
+  concept
+  problem
+  mistake
+}
+
+enum Difficulty {
+  easy
+  medium
+  hard
+}
+
+enum ExerciseType {
+  coding
+  mcq
+  flashcard
+  fill_blank
+  essay
+  matching
+  ordering
+  diagram
+  audio
+  true_false
+}
+
+enum OnboardingStatus {
+  incomplete
+  complete
+  skipped
+}
+
+enum ProblemStatus {
+  active
+  archived
+  legacy
+}
+
+enum SubjectCategory {
+  stem
+  humanities
+  professional
+  creative
+  languages
+  technology
+  lifestyle
+}
+
+enum SubmissionStatus {
+  pending
+  running
+  accepted
+  wrong_answer
+  tle
+  mle
+  error
+}
+
+enum TopicLevel {
+  topic
+  subtopic
+  pattern
+}
+
+enum TrustLabel {
+  human_reviewed
+  ai_validated
+  community
+}
+
+// =====================
+// SOCIAL & CHALLENGES
+// =====================
+
+model Friendship {
+  id          String           @id @default(uuid())
+  requesterId String           @map("requester_id")
+  addresseeId String           @map("addressee_id")
+  status      FriendshipStatus @default(pending)
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  requester   User @relation("FriendshipRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  addressee   User @relation("FriendshipAddressee", fields: [addresseeId], references: [id], onDelete: Cascade)
+
+  @@unique([requesterId, addresseeId])
+  @@map("friendships")
+}
+
+model DirectMessage {
+  id         String   @id @default(uuid())
+  senderId   String   @map("sender_id")
+  receiverId String   @map("receiver_id")
+  content    String
+  isRead     Boolean  @default(false) @map("is_read")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  sender   User @relation("MessagesSent", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User @relation("MessagesReceived", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@index([senderId, receiverId])
+  @@map("direct_messages")
+}
+
+model StudyChallenge {
+  id            String          @id @default(uuid())
+  challengerId  String          @map("challenger_id")
+  challengedId  String          @map("challenged_id")
+  challengeType ChallengeType
+  xpStake       Int             @default(50) @map("xp_stake")
+  targetValue   Int             @map("target_value") // e.g., 60 mins, 100 XP, 5 exercises
+  targetProblemId String?       @map("target_problem_id")
+  duration      Int             @default(24) // hours
+  status        ChallengeStatus @default(pending)
+  winnerId      String?         @map("winner_id")
+  startsAt      DateTime?       @map("starts_at")
+  endsAt        DateTime?       @map("ends_at")
+  createdAt     DateTime        @default(now()) @map("created_at")
+
+  challenger    User              @relation("ChallengesSent", fields: [challengerId], references: [id], onDelete: Cascade)
+  challenged    User              @relation("ChallengesReceived", fields: [challengedId], references: [id], onDelete: Cascade)
+  winner        User?             @relation("ChallengesWon", fields: [winnerId], references: [id])
+  results       ChallengeResult[]
+
+  @@map("study_challenges")
+}
+
+model ChallengeResult {
+  id          String   @id @default(uuid())
+  challengeId String   @map("challenge_id")
+  userId      String   @map("user_id")
+  score       Int      @default(0)
+  progress    Json?    // { studyMins: 45, exercisesDone: 3, xpEarned: 80 }
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  challenge StudyChallenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+
+  @@unique([challengeId, userId])
+  @@map("challenge_results")
+}
+
+enum FriendshipStatus {
+  pending
+  accepted
+  blocked
+}
+
+enum ChallengeType {
+  study_time    // Who studies more minutes
+  xp_race       // Who earns more XP
+  exercise_count // Who completes more exercises
+  quiz_score    // Who gets higher quiz average
+  leetcode_race // Who solves a problem first
+}
+
+enum ChallengeStatus {
+  pending
+  accepted
+  active
+  completed
+  cancelled
+}

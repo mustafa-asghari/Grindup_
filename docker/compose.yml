@@ -1,0 +1,76 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: grindup-postgres
+    environment:
+      POSTGRES_USER: grindup
+      POSTGRES_PASSWORD: grindup_secure_2024
+      POSTGRES_DB: grindup
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grindup -d grindup"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: grindup-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24-alpine
+    container_name: grindup-clickhouse
+    environment:
+      CLICKHOUSE_DB: grindup
+      CLICKHOUSE_USER: grindup
+      CLICKHOUSE_PASSWORD: grindup_secure_2024
+    ports:
+      - "8123:8123"  # HTTP interface
+      - "9001:9000"  # Native protocol (9001 to avoid conflict with Nexus)
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    # Suppress mempolicy warnings on macOS
+    cap_add:
+      - SYS_NICE
+    restart: unless-stopped
+
+  clickhouse-ui:
+    image: ghcr.io/caioricciuti/ch-ui:latest
+    container_name: clickhouse-ui
+    ports:
+      - "5521:5521"
+    depends_on:
+      - clickhouse
+    restart: unless-stopped
+
+networks:
+  default:
+    name: grindup-network
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  clickhouse_data:
+  clickhouse_logs:
