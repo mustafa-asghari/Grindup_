@@ -1,15 +1,112 @@
+import { timingSafeEqual } from 'crypto';
 import { NextResponse } from 'next/server';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { clickhouse, initClickHouse } from '@/lib/clickhouse';
 import { getEmbedding } from '@/lib/openai';
+import { sanitizeProblemHtml } from '@/lib/html-sanitizer';
 import { v4 as uuidv4 } from 'uuid';
 
 const LEETCODE_API_ENDPOINT = process.env.LEETCODE_API_URL || 'https://leetcode.com/graphql';
+const PROBLEM_SCRAPE_SECRET_ENV = 'PROBLEM_SCRAPE_SECRET';
 
 type ExtractedTestCase = {
     input: string;
     expectedOutput: string;
 };
+
+type ProblemDifficulty = 'easy' | 'medium' | 'hard';
+
+type LeetCodeListQuestion = {
+    titleSlug: string;
+};
+
+type LeetCodeCodeSnippet = {
+    lang: string;
+    code: string;
+};
+
+type LeetCodeTopicTag = {
+    name: string;
+};
+
+type LeetCodeQuestion = {
+    title: string;
+    content: string | null;
+    difficulty: string;
+    stats: string | null;
+    codeSnippets: LeetCodeCodeSnippet[] | null;
+    hints: string[] | null;
+    topicTags: LeetCodeTopicTag[];
+};
+
+type LeetCodeListResponse = {
+    errors?: Array<{ message?: string }>;
+    data?: {
+        problemsetQuestionList?: {
+            questions: LeetCodeListQuestion[];
+        };
+    };
+};
+
+type LeetCodeDetailResponse = {
+    errors?: Array<{ message?: string }>;
+    data?: {
+        question?: LeetCodeQuestion | null;
+    };
+};
+
+function getLeetCodeHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (compatible; GrindUpLocalImporter/1.0)',
+        'Referer': 'https://leetcode.com/problemset/',
+        'Origin': 'https://leetcode.com',
+    };
+
+    if (process.env.LEETCODE_CSRF_TOKEN) {
+        headers['x-csrftoken'] = process.env.LEETCODE_CSRF_TOKEN;
+    }
+
+    if (process.env.LEETCODE_COOKIE) {
+        headers['Cookie'] = process.env.LEETCODE_COOKIE;
+    }
+
+    return headers;
+}
+
+function getBearerToken(request: Request): string | null {
+    const authorization = request.headers.get('authorization');
+    const match = authorization?.match(/^Bearer\s+(.+)$/i);
+    return match?.[1]?.trim() || null;
+}
+
+function isAuthorizedScrapeRequest(request: Request): boolean {
+    const expectedSecret = process.env[PROBLEM_SCRAPE_SECRET_ENV]?.trim();
+    if (!expectedSecret) {
+        console.error(`${PROBLEM_SCRAPE_SECRET_ENV} is not configured; refusing problem scrape request.`);
+        return false;
+    }
+
+    const providedSecret = getBearerToken(request);
+    if (!providedSecret) {
+        return false;
+    }
+
+    const expected = Buffer.from(expectedSecret);
+    const provided = Buffer.from(providedSecret);
+
+    return expected.length === provided.length && timingSafeEqual(expected, provided);
+}
+
+function toProblemDifficulty(input: string): ProblemDifficulty {
+    const difficulty = input.toLowerCase();
+    if (difficulty === 'easy' || difficulty === 'medium' || difficulty === 'hard') {
+        return difficulty;
+    }
+
+    throw new Error('Unsupported LeetCode difficulty');
+}
 
 function decodeHtmlEntities(input: string): string {
     // Decode common named entities + numeric entities (decimal/hex).
@@ -153,7 +250,11 @@ function extractTestCases(htmlContent: string): ExtractedTestCase[] {
     });
 }
 
-export async function POST() {
+export async function POST(request: Request) {
+    if (!isAuthorizedScrapeRequest(request)) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     try {
         console.log("Starting LeetCode scrape with Vector Sync...");
         await initClickHouse();
@@ -172,28 +273,21 @@ export async function POST() {
 
         const listRes = await fetch(LEETCODE_API_ENDPOINT, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
-                'Referer': 'https://leetcode.com/problemset/',
-                'Origin': 'https://leetcode.com',
-                'x-csrftoken': 'sWFb2Dh5F7GQTxY2V65W3jeC3KVrXuHx',
-                'Cookie': 'csrftoken=sWFb2Dh5F7GQTxY2V65W3jeC3KVrXuHx; _gid=GA1.2.98586575.1768348915; ip_check=(false, "203.15.37.206"); gr_user_id=1c979af2-90e7-4497-8d7f-968c1680032f; 87b5a3c3f1a55520_gr_session_id=37d15cc5-fb21-4431-9090-f7efaf283aaa; 87b5a3c3f1a55520_gr_session_id_sent_vst=37d15cc5-fb21-4431-9090-f7efaf283aaa; __stripe_mid=7ed4d143-164e-4bdf-a715-f7a11815f0af81e6e2; __stripe_sid=dc4d00ec-345d-45b0-b552-30781d14ba689183a5; INGRESSCOOKIE=0cefd9aec0432530940ee0aefcbb3bda|8e0876c7c1464cc0ac96bc2edceabd27; _gat=1; _ga=GA1.1.2112201869.1768348915; _ga_CDRWKZTDEX=GS2.1.s1768359318$o3$g1$t1768361313$j60$l0$h0'
-            },
+            headers: getLeetCodeHeaders(),
             body: JSON.stringify({ query: listQuery, variables: { limit: scrapeLimit } })
         });
 
-        const listData = await listRes.json();
+        const listData = await listRes.json() as LeetCodeListResponse;
 
         if (listData.errors) {
-            throw new Error(`LeetCode List Error: ${listData.errors[0].message}`);
+            throw new Error(`LeetCode List Error: ${listData.errors[0]?.message ?? 'Unknown error'}`);
         }
         if (!listData.data || !listData.data.problemsetQuestionList) {
             console.error("Invalid LeetCode Response:", JSON.stringify(listData));
-            throw new Error(`LeetCode invalid response. Check logs or update cookies.`);
+            throw new Error(`LeetCode invalid response. Check logs or configure LEETCODE_COOKIE if required.`);
         }
 
-        const slugs = listData.data.problemsetQuestionList.questions.map((q: any) => q.titleSlug);
+        const slugs = listData.data.problemsetQuestionList.questions.map(q => q.titleSlug);
 
         let count = 0;
 
@@ -218,17 +312,10 @@ export async function POST() {
 
             const detailRes = await fetch(LEETCODE_API_ENDPOINT, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
-                    'Referer': 'https://leetcode.com/problemset/',
-                    'Origin': 'https://leetcode.com',
-                    'x-csrftoken': 'sWFb2Dh5F7GQTxY2V65W3jeC3KVrXuHx',
-                    'Cookie': 'csrftoken=sWFb2Dh5F7GQTxY2V65W3jeC3KVrXuHx; _gid=GA1.2.98586575.1768348915; ip_check=(false, "203.15.37.206"); gr_user_id=1c979af2-90e7-4497-8d7f-968c1680032f; 87b5a3c3f1a55520_gr_session_id=37d15cc5-fb21-4431-9090-f7efaf283aaa; 87b5a3c3f1a55520_gr_session_id_sent_vst=37d15cc5-fb21-4431-9090-f7efaf283aaa; __stripe_mid=7ed4d143-164e-4bdf-a715-f7a11815f0af81e6e2; __stripe_sid=dc4d00ec-345d-45b0-b552-30781d14ba689183a5; INGRESSCOOKIE=0cefd9aec0432530940ee0aefcbb3bda|8e0876c7c1464cc0ac96bc2edceabd27; _gat=1; _ga=GA1.1.2112201869.1768348915; _ga_CDRWKZTDEX=GS2.1.s1768359318$o3$g1$t1768361313$j60$l0$h0'
-                },
+                headers: getLeetCodeHeaders(),
                 body: JSON.stringify({ query: detailQuery, variables: { titleSlug: slug } })
             });
-            const detailData = await detailRes.json();
+            const detailData = await detailRes.json() as LeetCodeDetailResponse;
             if (detailData.errors) {
                 continue; // Skip faulty problem
             }
@@ -242,11 +329,12 @@ export async function POST() {
                 console.log(`Skipping locked/incomplete problem: ${q.title}`);
                 continue;
             }
+            const sanitizedContent = sanitizeProblemHtml(q.content);
 
-            const difficulty = q.difficulty.toLowerCase();
+            const difficulty = toProblemDifficulty(q.difficulty);
 
             // Prepare JSON for extra fields
-            const metaData = {
+            const metaData: Prisma.InputJsonObject = {
                 codeSnippets: q.codeSnippets,
                 stats: q.stats,
                 hints: q.hints
@@ -267,9 +355,9 @@ export async function POST() {
                 await prisma.problem.update({
                     where: { id: existing.id },
                     data: {
-                        description: q.content,
-                        difficulty: difficulty as any,
-                        constraints: metaData as any,
+                        description: sanitizedContent,
+                        difficulty,
+                        constraints: metaData,
                     }
                 });
             } else {
@@ -277,13 +365,13 @@ export async function POST() {
                     data: {
                         id: uuidv4(),
                         title: q.title,
-                        description: q.content,
-                        difficulty: difficulty as any,
+                        description: sanitizedContent,
+                        difficulty,
                         timeLimitMs: 2000,
                         memoryLimitKb: 256000,
-                        constraints: metaData as any,
+                        constraints: metaData,
                         topics: {
-                            create: q.topicTags.map((t: any) => ({
+                            create: q.topicTags.map(t => ({
                                 topic: {
                                     connectOrCreate: {
                                         where: { name: t.name },
@@ -299,7 +387,7 @@ export async function POST() {
 
             // Create test cases from examples (only if none exist yet)
             if (problemId && existingTestCaseCount === 0) {
-                const extracted = extractTestCases(q.content);
+                const extracted = extractTestCases(sanitizedContent);
                 if (extracted.length > 0) {
                     await prisma.testCases.createMany({
                         data: extracted.map((tc, idx) => ({
@@ -318,7 +406,7 @@ export async function POST() {
 
             // ClickHouse Vector Insert
             const statsStr = q.stats ? JSON.parse(q.stats).totalAccepted : ""; // simplified stats
-            const textToEmbed = `${q.title}. ${q.content}. Difficulty: ${difficulty}. ${statsStr}`;
+            const textToEmbed = `${q.title}. ${sanitizedContent}. Difficulty: ${difficulty}. ${statsStr}`;
             const embedding = await getEmbedding(textToEmbed);
 
             await clickhouse.insert({
@@ -326,7 +414,7 @@ export async function POST() {
                 values: [{
                     id: problemId,
                     title: q.title,
-                    content: q.content,
+                    content: sanitizedContent,
                     difficulty: difficulty,
                     embedding: embedding
                 }],
@@ -337,12 +425,10 @@ export async function POST() {
         }
 
         return NextResponse.json({ success: true, count, message: `Synced ${count} problems to Postgres & ClickHouse` });
-    } catch (e: any) {
+    } catch (e: unknown) {
         console.error("Scrape Error Details:", e);
-        // Return JSON error even on 500 to help debugging
         return NextResponse.json({
-            error: e.message || e.toString(),
-            stack: e.stack
+            error: 'Problem scrape failed'
         }, { status: 500 });
     }
 }

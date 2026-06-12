@@ -3,6 +3,27 @@ import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import { NextRequest, NextResponse } from 'next/server';
 
+const messageUserSelect = {
+    id: true,
+    name: true,
+    image: true,
+};
+
+async function canAccessContestChat(contestId: string, userId: string) {
+    const contest = await prisma.contest.findFirst({
+        where: {
+            id: contestId,
+            OR: [
+                { createdById: userId },
+                { participants: { some: { userId } } },
+            ],
+        },
+        select: { id: true },
+    });
+
+    return Boolean(contest);
+}
+
 export async function GET(
     request: NextRequest,
     props: { params: Promise<{ contestId: string }> }
@@ -15,16 +36,15 @@ export async function GET(
 
     const { contestId } = params;
 
+    if (!(await canAccessContestChat(contestId, session.user.id))) {
+        return new NextResponse('Forbidden', { status: 403 });
+    }
+
     const messages = await prisma.contestMessage.findMany({
         where: { contestId },
         include: {
             user: {
-                select: {
-                    id: true,
-                    name: true,
-                    image: true,
-                    email: true,
-                },
+                select: messageUserSelect,
             },
         },
         orderBy: {
@@ -47,6 +67,11 @@ export async function POST(
     }
 
     const { contestId } = params;
+
+    if (!(await canAccessContestChat(contestId, session.user.id))) {
+        return new NextResponse('Forbidden', { status: 403 });
+    }
+
     const json = await request.json();
     const { message } = json;
 
@@ -62,12 +87,7 @@ export async function POST(
         },
         include: {
             user: {
-                select: {
-                    id: true,
-                    name: true,
-                    image: true,
-                    email: true,
-                },
+                select: messageUserSelect,
             },
         },
     });

@@ -2,15 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import { v4 as uuidv4 } from 'uuid';
-import OpenAI from 'openai';
+import { openai } from '@/lib/openai';
 
 type ContentPreferences = {
     style?: string;
     tone?: string;
     customInstructions?: string;
 };
-
-const openai = new OpenAI();
 
 function formatPreferences(preferences?: ContentPreferences): string {
     if (!preferences) return '';

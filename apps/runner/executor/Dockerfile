@@ -4,15 +4,12 @@ FROM ubuntu:22.04
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Update and install dependencies
-RUN apt-get update && apt-get install -y \
+# Update and install only the runtimes and compilers used by the runner.
+RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
-    python3-pip \
     nodejs \
-    npm \
-    openjdk-17-jdk \
+    openjdk-17-jdk-headless \
     g++ \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js explicitly (standard repo might be old, but functional for basic algo)

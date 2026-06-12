@@ -17,19 +17,28 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'Subject ID is required' }, { status: 400 });
         }
 
-        // Delete the subject (Cascade will handle topics, userSubjects, etc.)
-        await prisma.subject.delete({
-            where: { id: subjectId },
+        const result = await prisma.userSubject.deleteMany({
+            where: {
+                userId: session.user.id,
+                subjectId,
+            },
         });
+
+        if (result.count === 0) {
+            return NextResponse.json(
+                { error: 'Subject enrollment not found' },
+                { status: 404 }
+            );
+        }
 
         revalidatePath('/subjects');
         revalidatePath('/');
 
         return NextResponse.json({ success: true });
     } catch (error) {
-        console.error('Error deleting subject:', error);
+        console.error('Error removing subject enrollment:', error);
         return NextResponse.json(
-            { error: 'Failed to delete subject' },
+            { error: 'Failed to remove subject enrollment' },
             { status: 500 }
         );
     }

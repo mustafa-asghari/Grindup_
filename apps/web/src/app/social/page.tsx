@@ -9,7 +9,7 @@ import { Users, Swords, Search } from 'lucide-react';
 
 export default async function SocialPage() {
     const session = await auth();
-    if (!session?.user?.id) redirect('/signin');
+    if (!session?.user?.id) redirect('/login');
 
     return (
         <div className="min-h-screen bg-black text-white p-6 md:p-12">

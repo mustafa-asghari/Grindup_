@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db';
+import type { Prisma } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 
 interface SubmissionJobData {
@@ -13,9 +14,17 @@ interface SubmissionResult {
     status: 'accepted' | 'wrong_answer' | 'tle' | 'mle' | 'error';
     runtime_ms?: number;
     memory_kb?: number;
-    test_results?: any;
+    test_results?: Prisma.InputJsonValue;
     error_message?: string;
 }
+
+type ClaimedSubmissionJob = {
+    id: string;
+    userId: string;
+    problemId: string;
+    code: string;
+    language: string;
+};
 
 /**
  * Queue a submission for processing
@@ -46,35 +55,30 @@ export async function getNextJob(): Promise<{
     code: string;
     language: string;
 } | null> {
-    // Use a transaction to atomically claim a job
-    const job = await prisma.$transaction(async (tx) => {
-        const nextJob = await tx.submissionJobs.findFirst({
-            where: {
-                status: 'queued',
-                attempts: { lt: 3 }, // Max 3 attempts
-            },
-            orderBy: [
-                { priority: 'asc' }, // Lower priority number = higher priority
-                { queuedAt: 'asc' }, // FIFO within same priority
-            ],
-        });
+    const [job] = await prisma.$queryRaw<ClaimedSubmissionJob[]>`
+        UPDATE submission_jobs
+        SET
+            status = 'processing',
+            started_at = NOW(),
+            attempts = attempts + 1
+        WHERE id = (
+            SELECT id
+            FROM submission_jobs
+            WHERE status = 'queued'
+                AND attempts < max_attempts
+            ORDER BY priority ASC, queued_at ASC
+            FOR UPDATE SKIP LOCKED
+            LIMIT 1
+        )
+        RETURNING
+            id,
+            user_id AS "userId",
+            problem_id AS "problemId",
+            code,
+            language
+    `;
 
-        if (!nextJob) return null;
-
-        // Mark as processing
-        await tx.submissionJobs.update({
-            where: { id: nextJob.id },
-            data: {
-                status: 'processing',
-                startedAt: new Date(),
-                attempts: { increment: 1 },
-            },
-        });
-
-        return nextJob;
-    });
-
-    return job;
+    return job ?? null;
 }
 
 /**
@@ -85,7 +89,7 @@ export async function completeJob(jobId: string, result: SubmissionResult): Prom
         where: { id: jobId },
         data: {
             status: 'completed',
-            result: result as any,
+            result: result as unknown as Prisma.InputJsonValue,
             completedAt: new Date(),
         },
     });
@@ -128,7 +132,7 @@ export async function failJob(jobId: string, errorMessage: string): Promise<void
  */
 export async function getJobStatus(jobId: string): Promise<{
     status: string;
-    result?: any;
+    result?: Prisma.JsonValue;
     errorMessage?: string;
     position?: number;
 } | null> {

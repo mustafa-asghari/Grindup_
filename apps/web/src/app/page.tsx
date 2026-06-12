@@ -3,7 +3,6 @@
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import { redirect } from 'next/navigation';
-import { AppShell } from '@/components/layout/app-shell';
 
 type SubmissionSummary = {
   id: string;
@@ -106,11 +105,7 @@ export default async function Home() {
   const session = await auth();
 
   if (!session?.user?.id) {
-    return (
-      <AppShell isLoggedIn={false}>
-        <LandingPage />
-      </AppShell>
-    );
+    return <LandingPage />;
   }
 
   const onboarding = await prisma.onboardingProfile.findUnique({
@@ -456,24 +451,17 @@ export default async function Home() {
   }
 
   return (
-    <AppShell
-      isLoggedIn={true}
+    <HomeDashboard
       displayName={displayName}
-      displayInitial={displayInitial}
-      userStats={userStats}
-    >
-      <HomeDashboard
-        displayName={displayName}
-        enrolledSubjects={enrolledSubjects}
-        recentActivity={recentActivity}
-        homeworkQueue={homeworkQueue}
-        studyStats={{
-          dailyGoal: 2,
-          dailyCompleted: dailyHoursCompleted,
-          weeklyGoal: 10,
-          weeklyCompleted: weeklyHoursCompleted
-        }}
-      />
-    </AppShell>
+      enrolledSubjects={enrolledSubjects}
+      recentActivity={recentActivity}
+      homeworkQueue={homeworkQueue}
+      studyStats={{
+        dailyGoal: 2,
+        dailyCompleted: dailyHoursCompleted,
+        weeklyGoal: 10,
+        weeklyCompleted: weeklyHoursCompleted
+      }}
+    />
   );
 }

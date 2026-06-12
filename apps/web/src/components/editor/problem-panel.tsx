@@ -11,7 +11,8 @@ import {
     Star,
     Flag
 } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { sanitizeProblemHtml } from '@/lib/html-sanitizer';
 
 interface Problem {
     id: string;
@@ -46,6 +47,10 @@ export function ProblemPanel({ problem, showHints = false, onShowHint }: Problem
     const [reason, setReason] = useState('');
     const [details, setDetails] = useState('');
     const [reportStatus, setReportStatus] = useState<'idle' | 'submitting' | 'done' | 'error'>('idle');
+    const sanitizedDescription = useMemo(
+        () => sanitizeProblemHtml(problem.description),
+        [problem.description]
+    );
 
     const submitReport = async () => {
         setReportStatus('submitting');
@@ -118,7 +123,7 @@ export function ProblemPanel({ problem, showHints = false, onShowHint }: Problem
             <div className="flex-1 overflow-y-auto p-8 space-y-8">
                 {/* Description */}
                 <section className="prose prose-invert max-w-none prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-800">
-                    <div dangerouslySetInnerHTML={{ __html: problem.description }} />
+                    <div dangerouslySetInnerHTML={{ __html: sanitizedDescription }} />
                 </section>
 
                 {/* Runner expectations */}

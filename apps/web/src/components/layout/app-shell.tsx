@@ -3,6 +3,7 @@
 import { Sidebar } from './sidebar';
 import { Header } from './header';
 import { cn } from '@/lib/utils';
+import { usePathname } from 'next/navigation';
 
 interface AppShellProps {
     children: React.ReactNode;
@@ -23,6 +24,16 @@ export function AppShell({
     displayName, 
     displayInitial 
 }: AppShellProps) {
+    const pathname = usePathname();
+    const fullBleedRoutes = [
+        '/problems/',
+        '/review',
+        '/history',
+        '/contests/',
+        '/flashcards',
+    ];
+    const isFullBleed = fullBleedRoutes.some((route) => pathname.startsWith(route));
+
     return (
         <div className="min-h-screen bg-background">
             {/* Desktop Sidebar - Only if logged in */}
@@ -43,7 +54,10 @@ export function AppShell({
                     displayName={displayName}
                     displayInitial={displayInitial}
                 />
-                <main className="flex-1 p-6 lg:p-8 max-w-7xl mx-auto w-full animate-in fade-in duration-500">
+                <main className={cn(
+                    "flex-1 w-full animate-in fade-in duration-500",
+                    isFullBleed ? "p-0" : "p-6 lg:p-8 max-w-7xl mx-auto"
+                )}>
                     {children}
                 </main>
             </div>

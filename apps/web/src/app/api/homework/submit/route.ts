@@ -1,31 +1,117 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/db';
-import OpenAI from 'openai';
+import { openai } from '@/lib/openai';
 import { Buffer } from 'buffer';
 import { v4 as uuidv4 } from 'uuid';
 
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_MULTIPART_BODY_BYTES = MAX_UPLOAD_BYTES + 1024 * 1024;
+const MAX_EXTRACTED_TEXT_CHARS = 50000;
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
+type AllowedHomeworkFileType = 'pdf' | 'image' | 'txt';
+
+class UploadValidationError extends Error {
+    status: number;
+
+    constructor(message: string, status: number) {
+        super(message);
+        this.name = 'UploadValidationError';
+        this.status = status;
+    }
+}
+
+function getFileExtension(fileName: string): string {
+    const index = fileName.lastIndexOf('.');
+    return index >= 0 ? fileName.slice(index).toLowerCase() : '';
+}
+
+function fileTypeFromExtension(fileName: string): AllowedHomeworkFileType | null {
+    const extension = getFileExtension(fileName);
+    if (extension === '.pdf') return 'pdf';
+    if (IMAGE_EXTENSIONS.includes(extension)) return 'image';
+    if (extension === '.txt' || extension === '.md') return 'txt';
+    return null;
+}
+
+function fileTypeFromMime(fileType: string): AllowedHomeworkFileType | null {
+    const mime = fileType.split(';', 1)[0].trim().toLowerCase();
+    if (mime === 'application/pdf') return 'pdf';
+    if (['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(mime)) return 'image';
+    if (['text/plain', 'text/markdown', 'text/x-markdown', 'application/x-markdown'].includes(mime)) return 'txt';
+    return null;
+}
+
+function getUploadValidationError(file: File): UploadValidationError | null {
+    if (file.size > MAX_UPLOAD_BYTES) {
+        return new UploadValidationError('File too large (max 10MB)', 413);
+    }
+
+    const extensionType = fileTypeFromExtension(file.name);
+    if (!extensionType) {
+        return new UploadValidationError('Unsupported file type. Upload a PDF, PNG/JPG/WebP/GIF image, TXT, or MD file.', 400);
+    }
+
+    const mime = file.type.split(';', 1)[0].trim().toLowerCase();
+    if (mime && mime !== 'application/octet-stream') {
+        const mimeType = fileTypeFromMime(mime);
+        if (!mimeType || mimeType !== extensionType) {
+            return new UploadValidationError('Unsupported file type. File extension and MIME type must match a supported PDF, image, TXT, or MD upload.', 400);
+        }
+    }
+
+    return null;
+}
+
+function getMultipartBodyValidationError(headers: Headers): UploadValidationError | null {
+    const contentLength = headers.get('content-length');
+    if (!contentLength) return null;
+
+    const parsedLength = Number(contentLength);
+    if (!Number.isSafeInteger(parsedLength) || parsedLength < 0) return null;
+
+    if (parsedLength > MAX_MULTIPART_BODY_BYTES) {
+        return new UploadValidationError('Multipart body too large (max 11MB)', 413);
+    }
+
+    return null;
+}
+
+function validateUploadFile(file: File): AllowedHomeworkFileType {
+    const validationError = getUploadValidationError(file);
+    if (validationError) throw validationError;
+    return fileTypeFromExtension(file.name) as AllowedHomeworkFileType;
+}
+
+function imageMimeType(file: File): string {
+    const mime = file.type.split(';', 1)[0].trim().toLowerCase();
+    if (fileTypeFromMime(mime) === 'image') return mime;
+
+    const extension = getFileExtension(file.name);
+    if (extension === '.jpg' || extension === '.jpeg') return 'image/jpeg';
+    if (extension === '.webp') return 'image/webp';
+    if (extension === '.gif') return 'image/gif';
+    return 'image/png';
+}
+
+function capExtractedText(text: string): string {
+    return text.slice(0, MAX_EXTRACTED_TEXT_CHARS);
+}
+
+function getErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
 
 // Extract text from uploaded file
 async function extractTextFromFile(file: File): Promise<{ text: string | null; fileType: string }> {
+    const fileType = validateUploadFile(file);
     const buffer = Buffer.from(await file.arrayBuffer());
-    const fileName = file.name.toLowerCase();
-
-    // Determine file type
-    let fileType = 'unknown';
-    if (fileName.endsWith('.pdf')) fileType = 'pdf';
-    else if (['.png', '.jpg', '.jpeg', '.webp', '.gif'].some(ext => fileName.endsWith(ext))) fileType = 'image';
-    else if (fileName.endsWith('.txt') || fileName.endsWith('.md')) fileType = 'txt';
-    else if (fileName.endsWith('.doc') || fileName.endsWith('.docx')) fileType = 'doc';
 
     // For images, use GPT-4 Vision
-    if (fileType === 'image' || file.type.startsWith('image/')) {
+    if (fileType === 'image') {
         try {
             const base64Image = buffer.toString('base64');
-            const mimeType = file.type || 'image/png';
+            const mimeType = imageMimeType(file);
 
             const response = await openai.chat.completions.create({
                 model: 'gpt-4o',
@@ -50,8 +136,9 @@ async function extractTextFromFile(file: File): Promise<{ text: string | null; f
                 max_tokens: 4000,
             });
 
+            const extractedText = response.choices[0]?.message?.content?.trim();
             return {
-                text: response.choices[0]?.message?.content?.trim() || null,
+                text: extractedText ? capExtractedText(extractedText) : null,
                 fileType: 'image'
             };
         } catch (e) {
@@ -63,13 +150,17 @@ async function extractTextFromFile(file: File): Promise<{ text: string | null; f
     // For PDFs
     if (fileType === 'pdf') {
         try {
+            if (buffer.toString('utf8', 0, 4) !== '%PDF') {
+                return { text: null, fileType: 'pdf' };
+            }
+
             const { createRequire } = await import('module');
             const require = createRequire(import.meta.url);
             const pdfParse = require('pdf-parse');
             const data = await pdfParse(buffer);
             const text = data.text?.trim() || '';
             if (text.length > 50) {
-                return { text, fileType: 'pdf' };
+                return { text: capExtractedText(text), fileType: 'pdf' };
             }
 
             // If pdf-parse returns little text, try Vision OCR
@@ -110,13 +201,14 @@ async function extractTextFromFile(file: File): Promise<{ text: string | null; f
                     max_tokens: 8000,
                 });
 
+                const extractedText = response.choices[0]?.message?.content?.trim();
                 return {
-                    text: response.choices[0]?.message?.content?.trim() || null,
+                    text: extractedText ? capExtractedText(extractedText) : null,
                     fileType: 'pdf'
                 };
             }
 
-            return { text: text || null, fileType: 'pdf' };
+            return { text: text ? capExtractedText(text) : null, fileType: 'pdf' };
         } catch (e) {
             console.error('PDF extraction failed:', e);
             return { text: null, fileType: 'pdf' };
@@ -126,20 +218,9 @@ async function extractTextFromFile(file: File): Promise<{ text: string | null; f
     // For text files
     if (fileType === 'txt') {
         return {
-            text: buffer.toString('utf8'),
+            text: capExtractedText(buffer.toString('utf8')),
             fileType: 'txt'
         };
-    }
-
-    // For doc files, try to read as text
-    try {
-        const text = buffer.toString('utf8');
-        const isBinary = text.replace(/[^\x20-\x7E\n\r\t]/g, '').length / text.length < 0.85;
-        if (!isBinary) {
-            return { text, fileType };
-        }
-    } catch (e) {
-        // Ignore
     }
 
     return { text: null, fileType };
@@ -211,11 +292,20 @@ export async function POST(request: NextRequest) {
         let file: File | null = null;
 
         if (contentType.includes('multipart/form-data')) {
+            const bodyValidationError = getMultipartBodyValidationError(request.headers);
+            if (bodyValidationError) {
+                return NextResponse.json({ error: bodyValidationError.message }, { status: bodyValidationError.status });
+            }
+
             const form = await request.formData();
             homeworkId = (form.get('homeworkId') as string) || '';
             textContent = (form.get('textContent') as string) || '';
             const fileData = form.get('file');
             if (fileData && fileData instanceof File) {
+                const validationError = getUploadValidationError(fileData);
+                if (validationError) {
+                    return NextResponse.json({ error: validationError.message }, { status: validationError.status });
+                }
                 file = fileData;
             }
         } else {
@@ -253,14 +343,16 @@ export async function POST(request: NextRequest) {
             const result = await extractTextFromFile(file);
             fileType = result.fileType;
             if (result.text) {
-                extractedContent = result.text;
+                extractedContent = capExtractedText(result.text);
             } else {
                 return NextResponse.json({
                     error: 'Could not extract content from file',
-                    details: 'Please try uploading a different file format (PDF, image, or text file).'
+                    details: 'Please try uploading a PDF, image, text, or Markdown file.'
                 }, { status: 400 });
             }
         }
+
+        extractedContent = capExtractedText(extractedContent);
 
         if (!extractedContent || extractedContent.trim().length < 10) {
             return NextResponse.json({
@@ -332,11 +424,15 @@ export async function POST(request: NextRequest) {
                 isGraded: true,
             },
         });
-    } catch (error: any) {
+    } catch (error) {
         console.error('Homework submission error:', error);
+        if (error instanceof UploadValidationError) {
+            return NextResponse.json({ error: error.message }, { status: error.status });
+        }
+
         return NextResponse.json({
             error: 'Failed to submit homework',
-            details: error.message || String(error)
+            details: getErrorMessage(error)
         }, { status: 500 });
     }
 }

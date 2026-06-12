@@ -9,6 +9,29 @@ class DockerService:
     def __init__(self):
         self.client = docker.from_env()
 
+    def _create_execution_temp_dir(self) -> Tuple[str, str]:
+        """
+        Return the runner-visible temp dir and the host-visible Docker bind path.
+        """
+        execution_workdir = os.environ.get("RUNNER_EXECUTION_WORKDIR")
+        execution_host_dir = os.environ.get("RUNNER_EXECUTION_HOST_DIR")
+
+        if not execution_workdir and not execution_host_dir:
+            temp_dir = tempfile.mkdtemp(prefix="grindup_run_")
+            return temp_dir, temp_dir
+
+        temp_base_dir = execution_workdir or execution_host_dir
+        os.makedirs(temp_base_dir, exist_ok=True)
+        temp_dir = tempfile.mkdtemp(prefix="grindup_run_", dir=temp_base_dir)
+
+        if execution_host_dir:
+            relative_temp_dir = os.path.relpath(temp_dir, temp_base_dir)
+            mount_source = os.path.join(execution_host_dir, relative_temp_dir)
+        else:
+            mount_source = temp_dir
+
+        return temp_dir, mount_source
+
     def run_code(
         self,
         image: str,
@@ -20,8 +43,9 @@ class DockerService:
         """
         Runs code in a temporary container.
         """
-        # Create a temporary directory on the host
-        temp_dir = tempfile.mkdtemp(prefix="grindup_run_")
+        # Create a temporary execution directory, optionally under a
+        # runner/host shared workdir for compose-based sibling containers.
+        temp_dir, mount_source = self._create_execution_temp_dir()
         
         try:
             # Write files to the temp directory
@@ -41,11 +65,12 @@ class DockerService:
 
             start_time = time.time()
             
+            container = None
             try:
                 container = self.client.containers.run(
                     image=image,
                     command=command,
-                    volumes={temp_dir: {'bind': '/app', 'mode': 'rw'}},
+                    volumes={mount_source: {'bind': '/app', 'mode': 'rw'}},
                     working_dir='/app',
                     network_disabled=True,
                     mem_limit=f"{memory_limit_mb}m",
@@ -79,8 +104,6 @@ class DockerService:
                 stdout = container.logs(stdout=True, stderr=False).decode('utf-8')
                 stderr = container.logs(stdout=False, stderr=True).decode('utf-8')
                 
-                container.remove()
-                
                 return stdout, stderr, exec_time_ms
 
             except docker.errors.ContainerError as e:
@@ -88,6 +111,12 @@ class DockerService:
             except Exception as e:
                 # Attempt to kill if verify fails
                 return "", f"System Error: {str(e)}", 0
+            finally:
+                if container is not None:
+                    try:
+                        container.remove(force=True)
+                    except Exception:
+                        pass
 
         finally:
             # Cleanup temp resources

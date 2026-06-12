@@ -1,0 +1,43 @@
+.git
+.gitignore
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Dependencies and generated output
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+**/dist
+build
+**/build
+coverage
+**/coverage
+.turbo
+**/.turbo
+.vercel
+**/.vercel
+
+# Python local state
+venv
+**/venv
+.venv
+**/.venv
+__pycache__
+**/__pycache__
+.pytest_cache
+**/.pytest_cache
+*.py[cod]
+
+# Logs and temporary files
+logs
+**/logs
+*.log
+*.tmp
+*.temp
+.DS_Store
+**/.DS_Store

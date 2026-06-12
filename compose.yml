@@ -1,0 +1,145 @@
+name: grindup
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: grindup-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-grindup}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-grindup_dev_only}
+      POSTGRES_DB: ${POSTGRES_DB:-grindup}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: grindup-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24-alpine
+    container_name: grindup-clickhouse
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-grindup}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-grindup}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-grindup_dev_only}
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    cap_add:
+      - SYS_NICE
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user \"$${CLICKHOUSE_USER}\" --password \"$${CLICKHOUSE_PASSWORD}\" --query 'SELECT 1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  clickhouse-ui:
+    image: ghcr.io/caioricciuti/ch-ui:latest
+    container_name: grindup-clickhouse-ui
+    ports:
+      - "${CLICKHOUSE_UI_HOST_PORT:-15521}:3488"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    restart: unless-stopped
+
+  executor-image:
+    image: grindup-executor:latest
+    build:
+      context: ./apps/runner/executor
+    command: ["/bin/true"]
+    restart: "no"
+
+  runner:
+    image: grindup-runner:local
+    build:
+      context: .
+      dockerfile: apps/runner/Dockerfile
+    environment:
+      RUNNER_EXECUTOR_IMAGE: grindup-executor:latest
+      RUNNER_SHARED_SECRET: ${RUNNER_SHARED_SECRET:-dev-only-runner-secret}
+      RUNNER_EXECUTION_WORKDIR: /tmp/grindup-runner-work
+      RUNNER_EXECUTION_HOST_DIR: ${RUNNER_EXECUTION_HOST_DIR:-/tmp/grindup-runner-work}
+      RUNNER_MAX_CONCURRENT_EXECUTIONS: ${RUNNER_MAX_CONCURRENT_EXECUTIONS:-2}
+      RUNNER_EXECUTION_QUEUE_TIMEOUT_MS: ${RUNNER_EXECUTION_QUEUE_TIMEOUT_MS:-0}
+    ports:
+      - "127.0.0.1:${RUNNER_HOST_PORT:-8080}:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${RUNNER_EXECUTION_HOST_DIR:-/tmp/grindup-runner-work}:/tmp/grindup-runner-work
+    depends_on:
+      executor-image:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  web:
+    image: grindup-web:local
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-grindup}:${POSTGRES_PASSWORD:-grindup_dev_only}@postgres:5432/${POSTGRES_DB:-grindup}
+      REDIS_URL: redis://redis:6379
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-grindup}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-grindup_dev_only}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-grindup}
+      NEXTAUTH_URL: http://localhost:3000
+      AUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev-only-change-me}
+      AUTH_SECRET: ${AUTH_SECRET:-dev-only-change-me}
+      AUTH_TRUST_HOST: "true"
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      RUNNER_URL: http://runner:8080
+      RUNNER_SHARED_SECRET: ${RUNNER_SHARED_SECRET:-dev-only-runner-secret}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      SERPER_API_KEY: ${SERPER_API_KEY:-}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+      TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
+    command: ["sh", "-c", "pnpm db:generate && pnpm db:push && pnpm --filter @grindup/web start"]
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      runner:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  default:
+    name: grindup-network
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  clickhouse_data:
+  clickhouse_logs:

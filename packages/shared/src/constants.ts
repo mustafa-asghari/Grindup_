@@ -30,7 +30,6 @@ export const SUPPORTED_LANGUAGES = [
     'javascript',
     'java',
     'cpp',
-    'csharp',
 ] as const;
 
 // Time limits by difficulty (ms)

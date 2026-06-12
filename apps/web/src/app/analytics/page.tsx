@@ -153,7 +153,7 @@ export default async function AnalyticsPage() {
 
         // Create a map of topic progress for quick lookup
         const progressMap = new Map(
-            topicProgress.map((tp: any) => [tp.subjectTopicId, tp.masteryPercent || 0])
+            topicProgress.map((tp: any) => [tp.topicId, tp.masteryPercent || 0])
         );
 
         // Build the radar data from all enrolled topics

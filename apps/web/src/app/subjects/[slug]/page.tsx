@@ -2,7 +2,6 @@ import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import { notFound, redirect } from 'next/navigation';
 import { SubjectDashboardClient } from '@/components/subjects/subject-dashboard-client';
-import { AppShell } from '@/components/layout/app-shell';
 
 interface PageProps {
     params: Promise<{ slug: string }>;
@@ -293,25 +292,18 @@ export default async function SubjectPage({ params }: PageProps) {
     }
 
     return (
-        <AppShell
+        <SubjectDashboardClient
+            subject={subjectData}
+            enrollment={enrollmentData}
+            topics={topicsData}
+            recentExercises={recentExercisesData}
+            learningContract={learningContractData}
             isLoggedIn={!!session}
+            userId={userId || null}
             userStats={userStats}
             displayName={displayName}
             displayInitial={displayInitial}
-        >
-            <SubjectDashboardClient
-                subject={subjectData}
-                enrollment={enrollmentData}
-                topics={topicsData}
-                recentExercises={recentExercisesData}
-                learningContract={learningContractData}
-                isLoggedIn={!!session}
-                userId={userId || null}
-                userStats={userStats}
-                displayName={displayName}
-                displayInitial={displayInitial}
-                flashcards={flashcards}
-            />
-        </AppShell>
+            flashcards={flashcards}
+        />
     );
 }

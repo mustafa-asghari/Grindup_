@@ -3,6 +3,27 @@ import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import { NextRequest, NextResponse } from 'next/server';
 
+const messageUserSelect = {
+    id: true,
+    name: true,
+    image: true,
+};
+
+async function canAccessLobbyChat(lobbyId: string, userId: string) {
+    const lobby = await prisma.contestLobby.findFirst({
+        where: {
+            id: lobbyId,
+            OR: [
+                { createdById: userId },
+                { participants: { some: { userId } } },
+            ],
+        },
+        select: { id: true },
+    });
+
+    return Boolean(lobby);
+}
+
 export async function GET(
     request: NextRequest,
     props: { params: Promise<{ lobbyId: string }> }
@@ -15,16 +36,15 @@ export async function GET(
 
     const { lobbyId } = params;
 
+    if (!(await canAccessLobbyChat(lobbyId, session.user.id))) {
+        return new NextResponse('Forbidden', { status: 403 });
+    }
+
     const messages = await prisma.contestLobbyMessage.findMany({
         where: { lobbyId },
         include: {
             user: {
-                select: {
-                    id: true,
-                    name: true,
-                    image: true,
-                    email: true,
-                },
+                select: messageUserSelect,
             },
         },
         orderBy: {
@@ -47,6 +67,11 @@ export async function POST(
     }
 
     const { lobbyId } = params;
+
+    if (!(await canAccessLobbyChat(lobbyId, session.user.id))) {
+        return new NextResponse('Forbidden', { status: 403 });
+    }
+
     const json = await request.json();
     const { message } = json;
 
@@ -62,12 +87,7 @@ export async function POST(
         },
         include: {
             user: {
-                select: {
-                    id: true,
-                    name: true,
-                    image: true,
-                    email: true,
-                },
+                select: messageUserSelect,
             },
         },
     });

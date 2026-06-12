@@ -60,6 +60,14 @@ async function scheduleReviewCard(opts: {
 export async function POST(req: Request) {
     try {
         const session = await auth();
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: 'Unauthorized' },
+                { status: 401 }
+            );
+        }
+
+        const userId = session.user.id;
         const body = await req.json();
 
         const { code, language, problem_id, test_cases, time_limit_ms, memory_limit_kb } = body;
@@ -88,28 +96,35 @@ export async function POST(req: Request) {
         const correlationId = uuidv4();
 
         // Create submission record (pending state)
-        let submission = null;
-        if (session?.user?.id) {
-            submission = await prisma.submission.create({
-                data: {
-                    id: uuidv4(),
-                    userId: session.user.id,
-                    problemId: problem_id,
-                    problemVersion: problem.version,
-                    code,
-                    language,
-                    status: 'running',
-                    correlationId,
-                },
-            });
-        }
+        const submission = await prisma.submission.create({
+            data: {
+                id: uuidv4(),
+                userId,
+                problemId: problem_id,
+                problemVersion: problem.version,
+                code,
+                language,
+                status: 'running',
+                correlationId,
+            },
+        });
 
         // Call the runner service
         let result;
         try {
-            const runnerResponse = await fetch('http://localhost:8080/execute', {
+            const runnerUrl = process.env.RUNNER_URL || 'http://localhost:8080';
+            const runnerHeaders: Record<string, string> = {
+                'Content-Type': 'application/json',
+            };
+            const runnerSharedSecret = process.env.RUNNER_SHARED_SECRET;
+
+            if (runnerSharedSecret) {
+                runnerHeaders['X-Runner-Token'] = runnerSharedSecret;
+            }
+
+            const runnerResponse = await fetch(`${runnerUrl}/execute`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: runnerHeaders,
                 body: JSON.stringify({
                     code,
                     language,
@@ -120,17 +135,19 @@ export async function POST(req: Request) {
             });
 
             result = await runnerResponse.json();
-        } catch (runnerError) {
-            // Update submission with error status
-            if (submission) {
-                await prisma.submission.update({
-                    where: { id: submission.id },
-                    data: {
-                        status: 'error',
-                        testResults: { error: 'Runner service unavailable' },
-                    },
-                });
+
+            if (!runnerResponse.ok) {
+                throw new Error('Runner service rejected execution request');
             }
+        } catch {
+            // Update submission with error status
+            await prisma.submission.update({
+                where: { id: submission.id },
+                data: {
+                    status: 'error',
+                    testResults: { error: 'Runner service unavailable' },
+                },
+            });
 
             return NextResponse.json({
                 error: 'Failed to connect to runner service',
@@ -157,8 +174,7 @@ export async function POST(req: Request) {
             });
 
             // If accepted, update user stats
-            if (result.status === 'accepted' && session?.user?.id) {
-                const userId = session.user.id;
+            if (result.status === 'accepted') {
                 const existingAccepted = await prisma.submission.findFirst({
                     where: {
                         userId: userId,
@@ -273,11 +289,10 @@ export async function POST(req: Request) {
             submission_id: submission?.id,
         });
 
-    } catch (error: any) {
-        console.error('Execution error:', error?.message || error);
-        console.error('Stack:', error?.stack);
+    } catch (error) {
+        console.error('Execution error:', error);
         return NextResponse.json(
-            { error: error?.message || 'Internal server error', status: 'error', details: String(error) },
+            { error: 'Internal server error', status: 'error' },
             { status: 500 }
         );
     }

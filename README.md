@@ -1,352 +1,237 @@
 # GrindUp
 
-GrindUp is an AI-native learning platform that combines curriculum generation, source-grounded tutoring, spaced repetition, homework workflows, analytics, and LeetCode-style coding practice in a single product.
+GrindUp is an AI-powered learning platform that turns source material into structured study plans, lessons, quizzes, flashcards, homework, analytics, and coding practice.
 
-The goal is simple: instead of giving learners a generic chatbot, build a system that can ingest real material, turn it into a structured subject, and then drive actual learning loops around it.
+It combines a Next.js product app, Prisma/PostgreSQL, ClickHouse retrieval, Redis support, OpenAI-powered generation, and a FastAPI code runner that executes submissions in Docker.
 
-## What This Project Demonstrates
+## What It Does
 
-- End-to-end full-stack product thinking, not just isolated UI work
-- Practical AI integration beyond chat, including content ingestion, retrieval, generation, and personalization
-- A split architecture with a Next.js application and a dedicated sandboxed code execution service
-- A large relational learning domain modeled in Prisma for progress, review, homework, gamification, and social systems
-- Real developer ergonomics with a pnpm monorepo, shared packages, Docker-backed local infrastructure, and separate runtime boundaries
+GrindUp is built around active learning loops:
 
-## Core Product Capabilities
+- import notes, PDFs, YouTube material, or manual subject plans
+- generate subject roadmaps, topics, lessons, quizzes, and homework
+- tutor from source-grounded context instead of generic chat alone
+- schedule flashcards and review cards with spaced repetition
+- track learning progress, streaks, weak areas, and study activity
+- solve coding problems in a Monaco editor with test-case feedback
+- run Python, JavaScript, Java, and C++ submissions through a separate runner service
 
-### 1. AI-Powered Subject Creation
+## Main Features
 
-Users can create a subject from:
+- AI subject creation and topic roadmap generation
+- source-grounded tutor chat and lesson generation
+- quiz, homework, flashcard, and review workflows
+- learning analytics, weekly reports, streaks, XP, and mastery tracking
+- coding practice workspace with scratchpads and test results
+- semantic problem/source retrieval with ClickHouse and OpenAI embeddings
+- credentials auth plus optional GitHub/Google OAuth
+- FastAPI runner service with Docker-based code execution
+- local infrastructure through Docker Compose
 
-- YouTube videos
-- PDFs
-- Freeform notes
-- Manual subject creation
+## Tech Stack
 
-The platform then:
-
-- extracts or OCRs the source material
-- generates a structured subject and topic hierarchy
-- stores source content for later retrieval
-- creates topic lessons and quizzes on demand
-
-### 2. Personalized Learning Setup
-
-Each subject can be configured through a guided setup flow:
-
-- weekly study hours
-- target deadline
-- diagnostic confidence check across topics
-- AI-generated roadmap based on current level
-
-This moves the product from "content browser" to "personalized study system".
-
-### 3. Source-Grounded AI Tutor
-
-The tutor is intentionally retrieval-grounded. Instead of answering from the model's general memory, it pulls from imported subject material and topic content, then teaches from that context.
-
-This is important because it:
-
-- reduces hallucination risk
-- keeps explanations aligned with the learner's actual materials
-- makes imported documents, lecture notes, and transcripts reusable across the product
-
-### 4. Lesson, Quiz, Homework, and Flashcard Generation
-
-For each topic, the platform can generate:
-
-- lesson content in Markdown
-- math-rich content rendered with KaTeX
-- concept diagrams using Mermaid
-- MCQ quizzes
-- flashcards tied into spaced repetition
-- homework assignments with due dates and reminders
-
-This gives the product a full active-learning loop instead of passive reading.
-
-### 5. Coding Practice + Execution Engine
-
-For technology subjects and algorithm practice, GrindUp includes:
-
-- a Monaco-based code editor
-- LeetCode-style problems
-- test-case driven submissions
-- runtime and correctness feedback
-- scratchpads and reporting flows
-- vector search over problem content
-
-Execution is isolated behind a dedicated runner service that currently supports:
-
-- Python
-- JavaScript
-- Java
-- C++
-
-### 6. Retention, Progress, and Motivation Systems
-
-The platform tracks learning with:
-
-- subject and topic progress
-- mastery percentages
-- review cards and flashcards using SM-2 style scheduling
-- XP, levels, streaks, and badge hooks
-- homework queues and late-penalty support
-- analytics views, heatmaps, and weekly reports
-
-### 7. Competitive and Social Surfaces
-
-The codebase also includes product surface for:
-
-- contest lobbies
-- challenge flows
-- social features and messaging
-- leaderboards
-
-This makes the system broader than a solo study tracker.
-
-## End-to-End User Flow
-
-1. A user signs up with credentials or optional OAuth.
-2. They import a PDF, YouTube lecture, or notes.
-3. GrindUp generates a subject, curriculum, and topic structure.
-4. The user chooses weekly commitment and target timeline.
-5. A diagnostic pass helps build a personalized roadmap.
-6. The learner studies lesson content, completes quizzes, and submits homework.
-7. Flashcards and review cards re-surface material later using spaced repetition.
-8. If the subject is coding-related, the learner can solve programming problems in the built-in workspace.
-9. Analytics and weekly summaries expose progress, weak areas, and study patterns.
+| Area | Technology |
+| --- | --- |
+| Web app | Next.js 16, React 19, TypeScript, Tailwind CSS |
+| Auth | NextAuth v5, Prisma adapter, credentials auth, optional GitHub/Google OAuth |
+| Database | PostgreSQL, Prisma |
+| Retrieval / analytics | ClickHouse |
+| Cache / queue support | Redis |
+| AI | OpenAI chat and embeddings |
+| Editor / content | Monaco Editor, React Markdown, KaTeX, Mermaid |
+| Runner | FastAPI, Python, Docker SDK |
+| Code execution | Docker executor image for Python, JavaScript, Java, and C++ |
+| Tooling | pnpm workspaces, Turborepo, ESLint |
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    U["User Browser"] --> W["Next.js Web App"]
-    W --> P["PostgreSQL + Prisma"]
-    W --> C["ClickHouse"]
-    W --> O["OpenAI APIs"]
-    W --> R["Python Runner Service"]
-    W --> E["Docker Executor Image"]
-    W --> D["Redis"]
-    W --> Y["YouTube / Imported Sources"]
-    R --> E
+    User["Learner / User"] --> Web["Next.js Web App"]
+
+    Web --> Auth["NextAuth / Auth Layer"]
+    Web --> API["Next.js API Routes"]
+    Web --> DB["PostgreSQL + Prisma"]
+    Web --> AI["OpenAI API"]
+    Web --> CH["ClickHouse Retrieval / Analytics"]
+    Web --> Redis["Redis Cache / Queue Support"]
+    Web --> Runner["FastAPI Runner Service"]
+
+    Runner --> Executor["Docker Code Executor"]
+    Executor --> Results["Test Results / Runtime Feedback"]
+
+    DB --> Progress["Progress, Subjects, Quizzes, Homework"]
+    CH --> Search["Semantic Search / Source Retrieval"]
+    AI --> Tutor["Grounded Tutor, Lessons, Quizzes"]
 ```
-
-## Why The Architecture Looks Like This
-
-### Next.js Web App
-
-The web app is the product shell. It handles:
-
-- authentication
-- server-rendered pages
-- route handlers
-- AI orchestration
-- progress tracking
-- dashboards and client UI
-
-### PostgreSQL + Prisma
-
-Postgres is the source of truth for the learning domain:
-
-- users
-- subjects
-- topics
-- exercises
-- attempts
-- homework
-- review cards
-- submissions
-- contests
-- analytics snapshots
-
-Prisma gives the project a strongly modeled domain with a large schema that reflects the product's complexity.
-
-### ClickHouse
-
-ClickHouse is used for fast analytical and vector-oriented workloads, including:
-
-- semantic problem search
-- imported source indexing
-- retrieval support for AI workflows
-
-### Python Runner Service
-
-Code execution is intentionally separated from the Next.js app. The runner:
-
-- receives submission payloads
-- wraps test harnesses
-- executes code inside Docker
-- returns pass/fail and runtime information
-
-This keeps untrusted code execution out of the main web process.
-
-### OpenAI Integration
-
-OpenAI is used for:
-
-- curriculum research and subject generation
-- lesson generation
-- quiz and homework generation
-- embeddings for retrieval and semantic search
-- tutor responses
-- OCR fallbacks for scanned PDFs
-
-## Tech Stack
-
-| Layer | Stack |
-| --- | --- |
-| Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS 4, Framer Motion |
-| Auth | NextAuth v5, Prisma adapter, credentials auth, optional GitHub/Google OAuth |
-| Database | PostgreSQL, Prisma |
-| Search / Retrieval | ClickHouse, OpenAI embeddings |
-| AI | OpenAI chat + embeddings |
-| Code Editor | Monaco Editor |
-| Math / Rich Content | React Markdown, KaTeX, Mermaid |
-| Execution | FastAPI, Python, Docker |
-| Monorepo Tooling | pnpm workspaces, Turborepo |
-| Supporting Infra | Redis, Docker Compose |
 
 ## Repo Structure
 
 ```text
 GrindUp/
 ├── apps/
-│   ├── runner/        # FastAPI service for sandboxed code execution
-│   └── web/           # Next.js product UI and API routes
+│   ├── web/                    # Next.js app, UI, API routes, auth, AI workflows
+│   └── runner/                 # FastAPI code runner service
+│       └── executor/           # Docker image used for sandboxed code execution
 ├── packages/
-│   ├── db/            # Shared Prisma schema and database package
-│   └── shared/        # Shared types and constants
+│   ├── db/                     # Prisma schema and shared Prisma client exports
+│   └── shared/                 # Shared types and constants
 ├── docker/
-│   └── compose.yml    # Local Postgres / Redis / ClickHouse stack
-├── start-dev.sh       # Local helper script for booting runner + web
-├── turbo.json         # Turborepo pipeline config
-└── pnpm-workspace.yaml
+│   └── compose.yml             # Infra-only compose stack
+├── compose.yml                 # Full local review stack
+├── REVIEWER_RUN_GUIDE.md       # Short runbook for technical reviewers
+├── .env.example                # Safe local environment template
+├── pnpm-workspace.yaml
+├── turbo.json
+└── start-dev.sh
 ```
 
-## Notable Engineering Decisions
+## Environment Variables
 
-### Grounded AI Instead of Generic AI
-
-The strongest product decision in this codebase is that imported materials are not just stored, they become the foundation for:
-
-- tutor retrieval
-- lesson generation
-- quiz generation
-- homework generation
-
-That gives the app a coherent learning loop and makes the AI behavior materially better than a plain chat wrapper.
-
-### Separate Runner for Untrusted Code
-
-Executing user code in the same process as the web app would be the wrong boundary. The separate runner service is a cleaner design for:
-
-- isolation
-- future scaling
-- language-specific execution logic
-- container-based sandboxing
-
-### Domain Model Over Toy Schema
-
-This is not a thin CRUD app. The Prisma schema models:
-
-- onboarding
-- subject enrollment
-- topic mastery
-- review scheduling
-- homework reminders
-- late penalties
-- submissions
-- contests
-- leaderboards
-- social features
-
-That modeling work is a major part of the project value.
-
-### Learning Science Built Into The Product
-
-The system is not just about generating content. It tries to support retention using:
-
-- review cards
-- flashcards
-- spaced repetition
-- mastery updates
-- streaks and rewards
-- analytics feedback loops
-
-## Local Development
-
-### Prerequisites
-
-- Node.js 20+
-- pnpm 8+
-- Python 3.11+
-- Docker Desktop
-
-### 1. Install dependencies
-
-```bash
-pnpm install
-```
-
-### 2. Create your environment file
+Copy `.env.example` to `.env` before running locally:
 
 ```bash
 cp .env.example .env
 ```
 
-If you use the included Docker Compose stack, keep these local defaults:
+Required for local core app:
 
-```env
-DATABASE_URL="postgresql://grindup:grindup_secure_2024@localhost:5432/grindup"
-CLICKHOUSE_URL="http://localhost:8123"
-CLICKHOUSE_USER="grindup"
-CLICKHOUSE_PASSWORD="grindup_secure_2024"
-CLICKHOUSE_DB="grindup"
-REDIS_URL="redis://localhost:6379"
-NEXTAUTH_URL="http://localhost:3000"
-NEXTAUTH_SECRET="replace-with-a-long-random-secret"
-OPENAI_API_KEY=""
-RUNNER_URL="http://localhost:8080"
+| Variable | Purpose | Safe local example |
+| --- | --- | --- |
+| `DATABASE_URL` | Prisma/PostgreSQL connection | `postgresql://grindup:grindup_dev_only@localhost:5432/grindup` |
+| `REDIS_URL` | Redis connection | `redis://localhost:6379` |
+| `CLICKHOUSE_URL` | ClickHouse HTTP endpoint | `http://localhost:8123` |
+| `CLICKHOUSE_USER` | ClickHouse user | `grindup` |
+| `CLICKHOUSE_PASSWORD` | ClickHouse local password | `grindup_dev_only` |
+| `CLICKHOUSE_DB` | ClickHouse database | `grindup` |
+| `NEXTAUTH_URL` | Auth callback base URL | `http://localhost:3000` |
+| `NEXTAUTH_SECRET` / `AUTH_SECRET` | Local auth signing secret | `dev-only-change-me` |
+| `RUNNER_URL` | FastAPI runner URL | `http://localhost:8080` |
+| `RUNNER_SHARED_SECRET` | Shared web-to-runner execution token | `dev-only-runner-secret` |
+
+Optional features:
+
+| Variable | Enables |
+| --- | --- |
+| `OPENAI_API_KEY` | AI tutor, lessons, quizzes, embeddings, import generation |
+| `SERPER_API_KEY` | Optional web research during topic generation |
+| `YOUTUBE_API_KEY` | YouTube metadata fallback during imports |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | GitHub OAuth |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth |
+| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET` | Optional anti-bot protection |
+| `LEETCODE_CSRF_TOKEN`, `LEETCODE_COOKIE` | Optional local LeetCode scrape headers |
+| `SCRAPE_LIMIT` | Maximum LeetCode problems to request during local scrape |
+
+Do not commit real `.env` files or production credentials.
+
+## Run Locally Without Docker
+
+Prerequisites:
+
+- Node.js 20+
+- pnpm 8+
+- Python 3.11+
+- Docker Desktop, required for the runner executor image
+- PostgreSQL, Redis, and ClickHouse running locally or through the infra compose stack
+
+Install dependencies and prepare the database:
+
+```bash
+pnpm install
+cp .env.example .env
+pnpm db:generate
+pnpm db:push
 ```
 
-Optional providers and services:
-
-- `GITHUB_CLIENT_ID`
-- `GITHUB_CLIENT_SECRET`
-- `GOOGLE_CLIENT_ID`
-- `GOOGLE_CLIENT_SECRET`
-- `SERPER_API_KEY`
-- `YOUTUBE_API_KEY`
-- `TURNSTILE_SITE_KEY`
-- `TURNSTILE_SECRET`
-
-### 3. Start local infrastructure
+Start local infrastructure if you do not already have PostgreSQL, Redis, and ClickHouse:
 
 ```bash
 docker compose -f docker/compose.yml up -d
 ```
 
-This brings up:
-
-- PostgreSQL
-- Redis
-- ClickHouse
-- ClickHouse UI
-
-### 4. Build the execution image
+Build the executor image used by the runner:
 
 ```bash
 docker build -t grindup-executor apps/runner/executor
 ```
 
-### 5. Push the Prisma schema
+Start the runner:
 
 ```bash
-pnpm db:generate
-pnpm db:push
+cd apps/runner
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+export RUNNER_SHARED_SECRET=dev-only-runner-secret
+python main.py
 ```
 
-### 6. Start the runner service
+Start the web app from the repo root:
+
+```bash
+pnpm --filter @grindup/web dev
+```
+
+Expected local URLs:
+
+- Web app: `http://localhost:3000`
+- Runner health: `http://localhost:8080/health`
+- ClickHouse UI: `http://localhost:5521`
+- PostgreSQL: `localhost:5432`
+- Redis: `localhost:6379`
+- ClickHouse HTTP: `http://localhost:8123`
+
+## Run With Docker
+
+Infra-only stack:
+
+```bash
+docker compose -f docker/compose.yml up -d
+```
+
+Executor image only:
+
+```bash
+docker build -t grindup-executor apps/runner/executor
+```
+
+Full local review stack from the repo root:
+
+```bash
+docker compose up --build
+```
+
+The full-stack compose file publishes the web app on `3000`, binds runner health/direct checks to `127.0.0.1:8080`, and publishes ClickHouse UI on `15521`. PostgreSQL, Redis, and ClickHouse are available inside the Compose network and are not bound to host database/cache ports, which avoids conflicts with local services. Runner `/execute` requests require `RUNNER_SHARED_SECRET`; the web service sends it automatically when configured.
+
+The infra-only compose file defaults to the standard local ports shown above. If you need different host ports for that workflow, set `POSTGRES_HOST_PORT`, `REDIS_HOST_PORT`, `CLICKHOUSE_HTTP_HOST_PORT`, `CLICKHOUSE_NATIVE_HOST_PORT`, or `CLICKHOUSE_UI_HOST_PORT` before running Compose.
+
+The full stack builds:
+
+- `grindup-web:local`
+- `grindup-runner:local`
+- `grindup-executor:latest`
+- PostgreSQL, Redis, ClickHouse, and ClickHouse UI
+
+The `executor-image` compose service is a build helper. It exits successfully after the executor image exists; the runner then launches short-lived executor containers through the mounted Docker socket.
+
+Stop Docker services:
+
+```bash
+docker compose down
+docker compose -f docker/compose.yml down
+```
+
+## Testing And Linting
+
+```bash
+pnpm install
+pnpm db:generate
+pnpm build
+pnpm lint
+pnpm test
+```
+
+Runner dependency check:
 
 ```bash
 cd apps/runner
@@ -356,119 +241,31 @@ pip install -r requirements.txt
 python main.py
 ```
 
-The runner starts on `http://localhost:8080`.
-
-### 7. Start the web app
-
-Open another terminal:
+Docker validation:
 
 ```bash
-pnpm --filter @grindup/web dev
+docker compose -f docker/compose.yml config
+docker compose -f docker/compose.yml build
+docker compose config
+docker compose build
 ```
 
-The app starts on `http://localhost:3000`.
+## Known Limitations
 
-### Optional: one-command local boot
+- AI generation, tutoring, embeddings, OCR fallbacks, and some import workflows require real API keys.
+- The runner is intended for local development and portfolio review. It uses Docker isolation, disables container networking for executed code, and runs executor containers as a non-root user, but it is not a complete production-grade sandbox.
+- Full Docker mode mounts `/var/run/docker.sock` into the runner so it can start executor containers. Treat that as a local development convenience, not a hardened deployment pattern.
+- The full Docker web service runs `prisma db push` on startup for reviewer convenience. Production deployments should use a controlled migration process.
+- Full Docker does not publish PostgreSQL, Redis, or ClickHouse database/cache ports to the host. Use the infra-only compose file when you want host access to those services.
+- File upload storage, background jobs, observability, and deployment infrastructure are intentionally minimal in this repo.
+- Optional LeetCode scraping can be rate-limited or require local headers. No browser cookies or private scrape headers are committed.
 
-There is also a helper script:
+## Security / Public-Safe Note
 
-```bash
-./start-dev.sh
-```
+This repo is prepared to be shared publicly:
 
-This is useful for local development, especially on macOS, because it:
-
-- kills existing ports
-- starts the Python runner
-- runs Prisma generate / push
-- starts the Next.js app
-
-## Key Product Surfaces
-
-### Subject Learning
-
-- subject library and enrollment
-- generated topic trees
-- topic detail pages with lessons and exercises
-- subject dashboard with progress context
-
-### Coding Practice
-
-- problem list
-- semantic search
-- submission flow
-- scratchpad support
-- review cards for accepted solutions
-
-### Active Recall
-
-- flashcard study
-- daily review queue
-- SM-2 scheduling logic
-
-### Study Operations
-
-- homework generation
-- homework submission and AI feedback
-- weekly reports
-- analytics heatmaps and radar charts
-
-### Social / Competitive
-
-- contests
-- contest lobbies
-- messaging and challenge surfaces
-
-## Selected Implementation Details
-
-### Import Pipeline
-
-The import flow is one of the most interesting parts of the project:
-
-- YouTube imports attempt transcript retrieval first, then fall back to metadata
-- PDF imports attempt text extraction first, then OCR and file-assisted AI fallback
-- imported content is stored for downstream lesson and tutor use
-- ClickHouse tables support source tracking and vector-oriented retrieval
-
-### Lesson Rendering
-
-Generated learning content supports:
-
-- Markdown
-- KaTeX-rendered mathematics
-- Mermaid diagrams
-
-That makes the system suitable for both coding and math-heavy subjects.
-
-### Review Scheduling
-
-Flashcard review uses an SM-2 style scheduling algorithm, which gives the product a retention mechanism rather than a simple "completed / not completed" state.
-
-### Semantic Search
-
-The coding side uses embeddings plus ClickHouse to retrieve semantically relevant problems, which is a meaningful step beyond basic keyword search.
-
-## If I Were Taking This To Production Next
-
-The next improvements I would prioritize are:
-
-1. background job infrastructure for long-running AI generation and imports
-2. automated integration tests around import, generation, and execution flows
-3. tighter sandboxing, quotas, and execution observability for the runner
-4. object storage for uploads and generated artifacts
-5. stronger evaluation and guardrails for AI-generated curriculum quality
-6. websocket or event-stream support for real-time contests and progress updates
-
-## Why This Project Matters
-
-Most AI learning products stop at "ask a chatbot a question". GrindUp goes further and treats learning as a system:
-
-- ingest source material
-- structure it into curriculum
-- personalize the plan
-- create practice loops
-- reinforce memory
-- track progress
-- support coding execution when needed
-
-That combination of product thinking, AI integration, and full-stack implementation is what makes this project worth showing in a job context.
+- generated folders such as `node_modules`, `.next`, build outputs, coverage, caches, virtual environments, and Python bytecode are ignored
+- `.env.example` contains only fake local placeholders
+- real `.env` files are ignored and should not be committed
+- committed scrape cookies and CSRF values have been removed
+- Docker local credentials are development placeholders only

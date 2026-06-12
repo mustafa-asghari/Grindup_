@@ -22,7 +22,7 @@ export default async function ProfilePage() {
     const session = await auth();
 
     if (!session?.user?.id) {
-        redirect('/signin');
+        redirect('/login');
     }
 
     const user = await prisma.user.findUnique({
@@ -43,7 +43,7 @@ export default async function ProfilePage() {
     });
 
     if (!user) {
-        redirect('/signin');
+        redirect('/login');
     }
 
     // Calculate completion stats or other derived metrics here if needed

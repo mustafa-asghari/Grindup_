@@ -3,6 +3,30 @@
     "globalDependencies": [
         "**/.env.*local"
     ],
+    "globalEnv": [
+        "DATABASE_URL",
+        "REDIS_URL",
+        "CLICKHOUSE_URL",
+        "CLICKHOUSE_USER",
+        "CLICKHOUSE_PASSWORD",
+        "CLICKHOUSE_DB",
+        "NEXTAUTH_URL",
+        "NEXTAUTH_SECRET",
+        "AUTH_URL",
+        "AUTH_SECRET",
+        "AUTH_TRUST_HOST",
+        "NEXT_PUBLIC_APP_URL",
+        "RUNNER_URL",
+        "OPENAI_API_KEY",
+        "SERPER_API_KEY",
+        "YOUTUBE_API_KEY",
+        "TURNSTILE_SITE_KEY",
+        "TURNSTILE_SECRET",
+        "LEETCODE_API_URL",
+        "LEETCODE_CSRF_TOKEN",
+        "LEETCODE_COOKIE",
+        "SCRAPE_LIMIT"
+    ],
     "tasks": {
         "build": {
             "dependsOn": [

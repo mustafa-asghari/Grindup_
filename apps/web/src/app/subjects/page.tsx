@@ -1,7 +1,6 @@
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import { SubjectsLibraryClient } from '@/components/subjects/subjects-library-client';
-import { AppShell } from '@/components/layout/app-shell';
 
 export const metadata = {
     title: 'Subjects | GrindUp',
@@ -87,12 +86,7 @@ export default async function SubjectsPage() {
     ];
 
     return (
-        <AppShell
-            isLoggedIn={!!session}
-            userStats={userStats}
-            displayName={displayName}
-            displayInitial={displayInitial}
-        >
+        <div className="p-6 lg:p-8 max-w-7xl mx-auto">
             <SubjectsLibraryClient
                 subjects={subjectsData}
                 categories={categories}
@@ -101,6 +95,6 @@ export default async function SubjectsPage() {
                 displayName={displayName}
                 displayInitial={displayInitial}
             />
-        </AppShell>
+        </div>
     );
 }

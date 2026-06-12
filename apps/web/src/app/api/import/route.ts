@@ -2,17 +2,129 @@ import { NextResponse } from 'next/server';
 import { createRequire } from 'module';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/db';
-import { ExerciseType } from '@prisma/client';
-import OpenAI from 'openai';
+import { ExerciseType, SubjectCategory } from '@prisma/client';
+import { openai } from '@/lib/openai';
 import { initImportSourcesTable, clickhouse } from '@/lib/clickhouse';
 import crypto from 'crypto';
-import { Readable } from 'stream';
 import { Buffer } from 'buffer';
 import { YoutubeTranscript } from 'youtube-transcript';
 
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_MULTIPART_BODY_BYTES = MAX_UPLOAD_BYTES + 1024 * 1024;
+const MAX_EXTRACTED_TEXT_CHARS = 100000;
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
+type AllowedUploadKind = 'pdf' | 'image' | 'text';
+
+type ImportPlanTopic = {
+    name?: { toString(): string };
+    description?: string;
+    order?: number;
+    estimatedMins?: number;
+    contentStart?: string;
+    contentEnd?: string;
+    sections?: ImportPlanTopic[];
+    subtopics?: ImportPlanTopic[];
+};
+
+type ImportPlan = {
+    name?: { toString(): string };
+    description?: string;
+    category?: string;
+    difficultyLevel?: string;
+    estimatedHours?: number;
+    topics?: ImportPlanTopic[];
+};
+
+class UploadValidationError extends Error {
+    status: number;
+
+    constructor(message: string, status: number) {
+        super(message);
+        this.name = 'UploadValidationError';
+        this.status = status;
+    }
+}
+
+function getFileExtension(fileName: string): string {
+    const index = fileName.lastIndexOf('.');
+    return index >= 0 ? fileName.slice(index).toLowerCase() : '';
+}
+
+function kindFromExtension(fileName: string): AllowedUploadKind | null {
+    const extension = getFileExtension(fileName);
+    if (extension === '.pdf') return 'pdf';
+    if (IMAGE_EXTENSIONS.includes(extension)) return 'image';
+    if (extension === '.txt' || extension === '.md') return 'text';
+    return null;
+}
+
+function kindFromMime(fileType: string): AllowedUploadKind | null {
+    const mime = fileType.split(';', 1)[0].trim().toLowerCase();
+    if (mime === 'application/pdf') return 'pdf';
+    if (['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(mime)) return 'image';
+    if (['text/plain', 'text/markdown', 'text/x-markdown', 'application/x-markdown'].includes(mime)) return 'text';
+    return null;
+}
+
+function getUploadValidationError(file: File): UploadValidationError | null {
+    if (file.size > MAX_UPLOAD_BYTES) {
+        return new UploadValidationError('File too large (max 10MB)', 413);
+    }
+
+    const extensionKind = kindFromExtension(file.name);
+    if (!extensionKind) {
+        return new UploadValidationError('Unsupported file type. Upload a PDF, PNG/JPG/WebP/GIF image, TXT, or MD file.', 400);
+    }
+
+    const mime = file.type.split(';', 1)[0].trim().toLowerCase();
+    if (mime && mime !== 'application/octet-stream') {
+        const mimeKind = kindFromMime(mime);
+        if (!mimeKind || mimeKind !== extensionKind) {
+            return new UploadValidationError('Unsupported file type. File extension and MIME type must match a supported PDF, image, TXT, or MD upload.', 400);
+        }
+    }
+
+    return null;
+}
+
+function getMultipartBodyValidationError(headers: Headers): UploadValidationError | null {
+    const contentLength = headers.get('content-length');
+    if (!contentLength) return null;
+
+    const parsedLength = Number(contentLength);
+    if (!Number.isSafeInteger(parsedLength) || parsedLength < 0) return null;
+
+    if (parsedLength > MAX_MULTIPART_BODY_BYTES) {
+        return new UploadValidationError('Multipart body too large (max 11MB)', 413);
+    }
+
+    return null;
+}
+
+function validateUploadFile(file: File): AllowedUploadKind {
+    const validationError = getUploadValidationError(file);
+    if (validationError) throw validationError;
+    return kindFromExtension(file.name) as AllowedUploadKind;
+}
+
+function imageMimeType(file: File): string {
+    const mime = file.type.split(';', 1)[0].trim().toLowerCase();
+    if (kindFromMime(mime) === 'image') return mime;
+
+    const extension = getFileExtension(file.name);
+    if (extension === '.jpg' || extension === '.jpeg') return 'image/jpeg';
+    if (extension === '.webp') return 'image/webp';
+    if (extension === '.gif') return 'image/gif';
+    return 'image/png';
+}
+
+function capExtractedText(text: string): string {
+    return text.slice(0, MAX_EXTRACTED_TEXT_CHARS);
+}
+
+function getErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
 
 function slugify(text: string): string {
     return text
@@ -245,8 +357,8 @@ Extract the text from all pages:`
         }
 
         console.warn('GPT-4 Vision returned insufficient text');
-    } catch (e: any) {
-        console.error('PDF to image conversion failed:', e?.message || e);
+    } catch (e) {
+        console.error('PDF to image conversion failed:', getErrorMessage(e));
     }
 
     // Method 3: Use OpenAI File Upload API (same as ChatGPT)
@@ -288,12 +400,12 @@ Instructions:
 
 Extract the full text content:`
                         },
-                        {
+                        ({
                             type: 'file',
                             file: {
                                 file_id: uploadedFile.id,
                             }
-                        } as any
+                        } satisfies { type: 'file'; file: { file_id: string } })
                     ]
                 }
             ],
@@ -314,53 +426,50 @@ Extract the full text content:`
         }
 
         console.warn('OpenAI File API returned insufficient text');
-    } catch (e: any) {
-        console.error('OpenAI File API failed:', e?.message || e);
+    } catch (e) {
+        console.error('OpenAI File API failed:', getErrorMessage(e));
     }
 
     return null;
 }
 
-async function fileToText(file: File): Promise<string> {
+async function fileToText(file: File): Promise<string | null> {
     console.log('=== fileToText called ===');
     console.log('File name:', file.name);
     console.log('File size:', file.size, 'bytes');
     console.log('File type:', file.type);
 
+    const uploadKind = validateUploadFile(file);
     const buffer = Buffer.from(await file.arrayBuffer());
     console.log('Buffer created, length:', buffer.byteLength);
-
-    // Limit size to ~10MB
-    if (buffer.byteLength > 10 * 1024 * 1024) {
-        throw new Error('File too large (max 10MB)');
-    }
 
     // Check if PDF by magic bytes
     const isPdf = buffer.toString('utf8', 0, 4) === '%PDF';
     console.log('Is PDF:', isPdf);
 
-    if (isPdf) {
+    if (uploadKind === 'pdf') {
+        if (!isPdf) {
+            console.log('PDF upload failed magic-byte check');
+            return null;
+        }
+
         console.log('Starting PDF extraction...');
         const result = await extractPdfText(buffer);
         if (result) {
             console.log('PDF extraction successful via', result.method, '- length:', result.text.length);
-            return result.text;
+            return capExtractedText(result.text);
         }
 
         // All methods failed
         console.error('=== All PDF extraction methods failed ===');
-        return null as any;
+        return null;
     }
 
-    // Check if image by magic bytes or file type
-    const isImage = file.type.startsWith('image/') ||
-        ['.png', '.jpg', '.jpeg', '.webp', '.gif'].some(ext => file.name.toLowerCase().endsWith(ext));
-
-    if (isImage) {
+    if (uploadKind === 'image') {
         console.log('Starting image OCR extraction...');
         try {
             const base64Image = buffer.toString('base64');
-            const mimeType = file.type || 'image/png';
+            const mimeType = imageMimeType(file);
 
             const response = await openai.chat.completions.create({
                 model: 'gpt-4o',
@@ -400,28 +509,27 @@ Extract the text:`
             const extractedText = response.choices[0]?.message?.content?.trim();
             if (extractedText && extractedText.length > 20) {
                 console.log('Image OCR successful. Length:', extractedText.length);
-                return extractedText;
+                return capExtractedText(extractedText);
             }
             console.warn('GPT-4 Vision returned insufficient text from image');
-            return null as any;
-        } catch (e: any) {
-            console.error('Image OCR failed:', e?.message || e);
-            return null as any;
+            return null;
+        } catch (e) {
+            console.error('Image OCR failed:', getErrorMessage(e));
+            return null;
         }
     }
 
-    // Try to decode as utf-8; for binaries (doc/ppt) we still check
     const text = buffer.toString('utf8');
     const isBinary = text.replace(/[^\x20-\x7E\n\r\t]/g, '').length / text.length < 0.85;
     console.log('Is binary:', isBinary);
 
     if (isBinary) {
         console.log('File detected as binary, returning null');
-        return null as any;
+        return null;
     }
 
     console.log('File decoded as text, length:', text.length);
-    return text;
+    return capExtractedText(text);
 }
 
 export async function POST(request: Request) {
@@ -439,6 +547,11 @@ export async function POST(request: Request) {
         let replaceExisting = false;
 
         if (contentType.includes('multipart/form-data')) {
+            const bodyValidationError = getMultipartBodyValidationError(request.headers);
+            if (bodyValidationError) {
+                return NextResponse.json({ error: bodyValidationError.message }, { status: bodyValidationError.status });
+            }
+
             const form = await request.formData();
             subjectName = (form.get('subjectName') as string) || '';
             sourceType = (form.get('sourceType') as string) || '';
@@ -447,6 +560,10 @@ export async function POST(request: Request) {
             replaceExisting = form.get('replace') === 'true';
             const file = form.get('file');
             if (file && file instanceof File) {
+                const validationError = getUploadValidationError(file);
+                if (validationError) {
+                    return NextResponse.json({ error: validationError.message }, { status: validationError.status });
+                }
                 fileName = file.name;
                 fileText = await fileToText(file);
             }
@@ -640,18 +757,18 @@ Create 3-8 topics based on actual content structure. Use exact section names.
         });
 
         const content = completion.choices[0].message.content || '{}';
-        let plan: any;
+        let plan: ImportPlan;
         try {
-            plan = JSON.parse(content);
+            plan = JSON.parse(content) as ImportPlan;
         } catch {
             return NextResponse.json({ error: 'Failed to parse AI response' }, { status: 500 });
         }
 
         const aiName = plan.name?.toString().slice(0, 120);
         // Prioritize user-provided name over AI-generated name
-        let subjectDisplayName = finalName || aiName || `Imported Subject ${Math.random().toString(36).slice(2, 6)}`;
+        const subjectDisplayName = finalName || aiName || `Imported Subject ${Math.random().toString(36).slice(2, 6)}`;
         const description = plan.description?.slice(0, 240) || `Learning ${subjectDisplayName}`;
-        const category = plan.category || 'stem';
+        const category = (plan.category || 'stem') as SubjectCategory;
         const difficulty = plan.difficultyLevel || 'beginner';
         const estimatedHours = Math.min(Math.max(Number(plan.estimatedHours) || 40, 10), 200);
         const topics = Array.isArray(plan.topics) ? plan.topics.slice(0, 12) : [];
@@ -688,16 +805,6 @@ Create 3-8 topics based on actual content structure. Use exact section names.
         });
         if (existingAi) {
             slug = `${slug}-${Math.random().toString(36).slice(2, 5)}`;
-        }
-
-        // Prepare the full source content to store
-        let fullSourceContent = '';
-        if (sourceType === 'youtube') {
-            fullSourceContent = youtubeTranscript || '';
-        } else if (sourceType === 'file') {
-            fullSourceContent = fileText || '';
-        } else if (sourceType === 'notes') {
-            fullSourceContent = notesText || '';
         }
 
         // Fix exerciseTypes to match Enum
@@ -985,7 +1092,7 @@ Create 3 MCQs and 2 flashcards. Questions must be based ONLY on the content prov
             });
 
             // Only create homework for topics that have MCQ exercises
-            const topicsWithExercises = allTopics.filter((t: any) => t.exercise.length >= 3);
+            const topicsWithExercises = allTopics.filter((t) => t.exercise.length >= 3);
 
             for (const topic of topicsWithExercises) {
                 const dueDate = new Date();
@@ -1113,11 +1220,15 @@ Create 3 MCQs and 2 flashcards. Questions must be based ONLY on the content prov
         }
 
         return NextResponse.json({ success: true, slug: subject.slug });
-    } catch (error: any) {
+    } catch (error) {
         console.error('Import API Error:', error);
+        if (error instanceof UploadValidationError) {
+            return NextResponse.json({ error: error.message }, { status: error.status });
+        }
+
         return NextResponse.json({
             error: 'Import failed',
-            details: error.message || String(error)
+            details: getErrorMessage(error)
         }, { status: 500 });
     }
 }

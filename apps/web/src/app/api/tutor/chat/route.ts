@@ -1,11 +1,7 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/db';
-import OpenAI from 'openai';
-
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
+import { openai } from '@/lib/openai';
 
 function cosineSimilarity(vecA: number[], vecB: number[]) {
     let dot = 0;
@@ -127,4 +123,3 @@ ${!topicContent && !ragContext ? '⚠️ No content has been imported for this s
         return NextResponse.json({ error: 'Failed to generate response' }, { status: 500 });
     }
 }
-

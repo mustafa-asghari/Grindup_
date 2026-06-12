@@ -1,10 +1,15 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 from typing import Optional, List
+import asyncio
 import uvicorn
 import re
 import json
+import os
+import secrets
 
 from services.docker_service import DockerService
 from handlers.python_handler import PythonHandler
@@ -35,6 +40,82 @@ handlers = {
     "java": JavaHandler(),
     "cpp": CppHandler(),
 }
+
+RUNNER_TOKEN_HEADER = "x-runner-token"
+DEFAULT_MAX_CONCURRENT_EXECUTIONS = 2
+DEFAULT_EXECUTION_QUEUE_TIMEOUT_MS = 0
+
+
+def parse_int_env(name: str, default: int, min_value: int) -> int:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return default
+
+    if value < min_value:
+        return default
+
+    return value
+
+
+MAX_CONCURRENT_EXECUTIONS = parse_int_env(
+    "RUNNER_MAX_CONCURRENT_EXECUTIONS",
+    DEFAULT_MAX_CONCURRENT_EXECUTIONS,
+    min_value=1,
+)
+EXECUTION_QUEUE_TIMEOUT_MS = parse_int_env(
+    "RUNNER_EXECUTION_QUEUE_TIMEOUT_MS",
+    DEFAULT_EXECUTION_QUEUE_TIMEOUT_MS,
+    min_value=0,
+)
+execution_limiter = asyncio.Semaphore(MAX_CONCURRENT_EXECUTIONS)
+
+
+async def acquire_execution_slot() -> None:
+    if EXECUTION_QUEUE_TIMEOUT_MS == 0:
+        if execution_limiter.locked():
+            raise HTTPException(
+                status_code=429,
+                detail="Runner is busy; try again shortly",
+            )
+        await execution_limiter.acquire()
+        return
+
+    try:
+        await asyncio.wait_for(
+            execution_limiter.acquire(),
+            timeout=EXECUTION_QUEUE_TIMEOUT_MS / 1000,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=429,
+            detail="Runner is busy; try again shortly",
+        )
+
+
+@app.middleware("http")
+async def require_runner_secret(request: Request, call_next):
+    shared_secret = os.environ.get("RUNNER_SHARED_SECRET")
+
+    if shared_secret and request.method == "POST" and request.url.path == "/execute":
+        supplied_secret = request.headers.get(RUNNER_TOKEN_HEADER)
+        if not supplied_secret:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Missing runner token"},
+            )
+        if not secrets.compare_digest(supplied_secret, shared_secret):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Invalid runner token"},
+            )
+
+    return await call_next(request)
+
 
 class SubmissionRequest(BaseModel):
     code: str
@@ -93,13 +174,18 @@ async def execute_code(request: SubmissionRequest):
     command = handler.get_execution_command(filename)
     
     # 3. Run in container
-    stdout, stderr, exec_time = docker_service.run_code(
-        image="grindup-executor",
-        command=command,
-        files=files,
-        time_limit_ms=request.time_limit_ms,
-        memory_limit_mb=request.memory_limit_kb // 1024
-    )
+    await acquire_execution_slot()
+    try:
+        stdout, stderr, exec_time = await run_in_threadpool(
+            docker_service.run_code,
+            image=os.environ.get("RUNNER_EXECUTOR_IMAGE", "grindup-executor"),
+            command=command,
+            files=files,
+            time_limit_ms=request.time_limit_ms,
+            memory_limit_mb=request.memory_limit_kb // 1024
+        )
+    finally:
+        execution_limiter.release()
 
     # 4. Check for Hard Timeouts (returned differently by docker service)
     if "Time Limit Exceeded" in stderr:

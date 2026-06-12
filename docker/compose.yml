@@ -3,15 +3,15 @@ services:
     image: postgres:16-alpine
     container_name: grindup-postgres
     environment:
-      POSTGRES_USER: grindup
-      POSTGRES_PASSWORD: grindup_secure_2024
-      POSTGRES_DB: grindup
+      POSTGRES_USER: ${POSTGRES_USER:-grindup}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-grindup_dev_only}
+      POSTGRES_DB: ${POSTGRES_DB:-grindup}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U grindup -d grindup"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -23,7 +23,7 @@ services:
     container_name: grindup-redis
     command: redis-server --appendonly yes
     ports:
-      - "6379:6379"
+      - "${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -37,12 +37,12 @@ services:
     image: clickhouse/clickhouse-server:24-alpine
     container_name: grindup-clickhouse
     environment:
-      CLICKHOUSE_DB: grindup
-      CLICKHOUSE_USER: grindup
-      CLICKHOUSE_PASSWORD: grindup_secure_2024
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-grindup}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-grindup}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-grindup_dev_only}
     ports:
-      - "8123:8123"  # HTTP interface
-      - "9001:9000"  # Native protocol (9001 to avoid conflict with Nexus)
+      - "${CLICKHOUSE_HTTP_HOST_PORT:-8123}:8123"  # HTTP interface
+      - "${CLICKHOUSE_NATIVE_HOST_PORT:-9001}:9000"  # Native protocol
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - clickhouse_logs:/var/log/clickhouse-server
@@ -53,13 +53,19 @@ services:
     # Suppress mempolicy warnings on macOS
     cap_add:
       - SYS_NICE
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user \"$${CLICKHOUSE_USER}\" --password \"$${CLICKHOUSE_PASSWORD}\" --query 'SELECT 1'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   clickhouse-ui:
     image: ghcr.io/caioricciuti/ch-ui:latest
     container_name: clickhouse-ui
     ports:
-      - "5521:5521"
+      - "${CLICKHOUSE_UI_HOST_PORT:-5521}:3488"
     depends_on:
       - clickhouse
     restart: unless-stopped

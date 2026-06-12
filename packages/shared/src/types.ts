@@ -1,34 +1,38 @@
 // Submission types
+export type ExecutionLanguage = 'python' | 'javascript' | 'java' | 'cpp';
+
 export interface SubmissionRequest {
     code: string;
-    language: 'python' | 'javascript' | 'java' | 'cpp' | 'csharp';
-    problemId: string;
-    testCases: TestCase[];
-    timeLimitMs: number;
-    memoryLimitKb: number;
+    language: ExecutionLanguage;
+    problem_id: string;
+    test_cases: TestCase[];
+    time_limit_ms?: number;
+    memory_limit_kb?: number;
 }
 
 export interface TestCase {
     id: string;
     input: string;
-    expectedOutput: string;
-    isHidden: boolean;
+    expected_output: string;
+    is_hidden: boolean;
 }
 
 export interface SubmissionResult {
     status: 'accepted' | 'wrong_answer' | 'tle' | 'mle' | 'error';
-    testResults: TestResult[];
-    runtimeMs: number;
-    memoryKb: number;
-    error?: string;
+    test_results: TestResult[];
+    runtime_ms: number;
+    memory_kb: number;
+    submission_id?: string;
+    error?: string | null;
 }
 
 export interface TestResult {
-    testCaseId: string;
+    test_case_id: string;
     passed: boolean;
-    actualOutput?: string;
-    runtimeMs: number;
-    isHidden: boolean;
+    actual_output?: string | null;
+    runtime_ms: number;
+    is_hidden: boolean;
+    error?: string | null;
 }
 
 // AI types

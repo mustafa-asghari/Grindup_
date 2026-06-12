@@ -5,11 +5,7 @@ import { checkRateLimit } from '@/lib/rate-limit';
 import { checkCSRF } from '@/lib/csrf';
 import { logSecurityEvent } from '@/lib/logging';
 import { headers } from 'next/headers';
-import OpenAI from 'openai';
-
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
+import { openai } from '@/lib/openai';
 
 function cosineSimilarity(vecA: number[], vecB: number[]) {
     let dot = 0;

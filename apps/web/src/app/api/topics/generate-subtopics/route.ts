@@ -2,11 +2,7 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { prisma } from '@/lib/db';
 import { auth } from '@/lib/auth';
-import OpenAI from 'openai';
-
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
+import { openai } from '@/lib/openai';
 
 // Web search function for researching subtopics
 async function searchSubtopics(subjectName: string, topicName: string): Promise<string | null> {

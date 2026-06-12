@@ -8,7 +8,4 @@ export const prisma =
         log: process.env.NODE_ENV === 'development' ? ['query'] : [],
     });
 
-console.log('DEBUG: db.ts initialized, prisma instance:', !!prisma);
-
-
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;

@@ -1,0 +1,836 @@
+{
+  "workflow": {
+    "stage": "final_review_complete",
+    "skill": "review-skill.md",
+    "human_commits_only": true,
+    "implementation_agents": [
+      "worker",
+      "original_specialist",
+      "eval_supervisor"
+    ],
+    "last_updated": "2026-06-12T01:35:35Z"
+  },
+  "repo": {
+    "name": "GrindUp",
+    "package_manager": "pnpm",
+    "main_language": "TypeScript",
+    "frameworks": [
+      "Next.js",
+      "FastAPI",
+      "Prisma",
+      "PostgreSQL",
+      "ClickHouse",
+      "Redis",
+      "Docker"
+    ]
+  },
+  "summary": {
+    "total_findings": 15,
+    "critical": 0,
+    "high": 11,
+    "medium": 2,
+    "low": 2,
+    "queued": 0,
+    "implemented": 1,
+    "needs_user_test": 14,
+    "approved": 0,
+    "committed_by_user": 0,
+    "remaining": 0
+  },
+  "tasks": [
+    {
+      "id": "SEC-001",
+      "title": "Runner and execute API allow unauthenticated code execution",
+      "owner_agent": "security",
+      "owner_agent_name": "Security Agent - Paranoid Threat Hunter",
+      "worker_personality": "Security Worker - Paranoid Threat Hunter",
+      "source_report": "Agents/plan/01-security.md",
+      "specialist_eval_required": true,
+      "severity": "High",
+      "confidence": "High",
+      "priority_order": 1,
+      "status": "needs_user_test",
+      "files_involved": [
+        "apps/web/src/app/api/execute/route.ts",
+        "apps/runner/main.py",
+        "compose.yml"
+      ],
+      "root_cause": "The web execute route reads the session but does not require it, and the runner exposes POST /execute without a shared service credential while compose publishes runner port 8080.",
+      "where_it_fails": "Unauthenticated callers can reach either /api/execute or the runner /execute endpoint and trigger Docker execution.",
+      "current_behavior": "No session cookie or service token is required; code is executed and results are returned.",
+      "expected_behavior": "User-facing execution requires an authenticated user session, and runner execution requires a server-side shared token from the web app.",
+      "proof_example": "curl -i -X POST http://localhost:8080/execute -H 'Content-Type: application/json' --data '{\"code\":\"def solution(x): return x\",\"language\":\"python\",\"test_cases\":[{\"id\":\"t1\",\"input\":\"x = 1\",\"expected_output\":\"1\",\"is_hidden\":false}],\"time_limit_ms\":2000,\"memory_limit_kb\":256000}'",
+      "fix_location": "apps/web/src/app/api/execute/route.ts POST around lines 60-65 and 107-120; apps/runner/main.py execute_code around lines 69-103; compose.yml runner service around lines 80-85.",
+      "what_to_change": "Require session.user.id before accepting /api/execute, send a shared runner token header from the web app, require that header in the runner, and stop exposing runner on all host interfaces in compose.",
+      "expected_result_after_fix": "Unauthenticated /api/execute returns 401 before creating a submission, and direct /execute without the token returns 401 or 403 before any Docker container is created.",
+      "test_gap": "No API or runner tests assert unauthenticated execution is rejected or runner token checks are enforced.",
+      "validation_commands": [
+        "python3 -m py_compile apps/runner/main.py",
+        "pnpm --filter @grindup/web lint",
+        "docker compose config",
+        "docker compose up --build -d",
+        "curl -i -X POST http://localhost:8080/execute -H 'Content-Type: application/json' --data '{\"code\":\"def solution(x): return x\",\"language\":\"python\",\"test_cases\":[{\"id\":\"t1\",\"input\":\"x = 1\",\"expected_output\":\"1\",\"is_hidden\":false}],\"time_limit_ms\":2000,\"memory_limit_kb\":256000}'"
+      ],
+      "manual_user_test": {
+        "where_to_test": "http://localhost:3000 problem editor and direct runner endpoint http://localhost:8080/execute if the runner is intentionally published locally.",
+        "steps": [
+          "Run docker compose up --build -d.",
+          "Send the proof curl directly to the runner without the token.",
+          "Send POST /api/execute without a logged-in browser session.",
+          "Log in and run code from a problem editor."
+        ],
+        "expected_result": "Direct runner calls without the token fail with 401/403, unauthenticated web calls fail with 401, and authenticated editor execution still works through the web service.",
+        "regression_checks": [
+          "Runner health remains available at /health.",
+          "The web service can still call the runner when RUNNER_SHARED_SECRET matches.",
+          "No submission row is created for unauthenticated web execution."
+        ]
+      },
+      "suggested_commit_message": "Fix unauthenticated runner execution",
+      "worker_patch_note": "Agents/patches/SEC-001.md",
+      "specialist_eval_report": "Agents/patches/SEC-001-specialist-eval.md",
+      "supervisor_eval_report": "Agents/patches/SEC-001-eval.md",
+      "user_test_report": "Agents/patches/SEC-001-user-test.md",
+      "approval": {
+        "requires_user_approval": true,
+        "approved_by_user": false,
+        "approved_at": null
+      }
+    },
+    {
+      "id": "VAL-001",
+      "title": "Problem descriptions render unsanitized third-party HTML",
+      "owner_agent": "validation",
+      "owner_agent_name": "Validation and Sanitisation Agent - Input Gatekeeper",
+      "worker_personality": "Validation Worker - Input Gatekeeper",
+      "source_report": "Agents/plan/02-validation-sanitisation.md",
+      "specialist_eval_required": true,
+      "severity": "High",
+      "confidence": "High",
+      "priority_order": 2,
+      "status": "needs_user_test",
+      "files_involved": [
+        "apps/web/src/app/api/problems/scrape/route.ts",
+        "apps/web/src/components/editor/problem-panel.tsx"
+      ],
+      "root_cause": "Third-party problem HTML is stored and later rendered with dangerouslySetInnerHTML without sanitization.",
+      "where_it_fails": "Problem panel rendering of Problem.description.",
+      "current_behavior": "Hostile HTML can execute in the browser.",
+      "expected_behavior": "Only sanitized, allowlisted HTML is rendered.",
+      "proof_example": "Set a local problem description to '<img src=x onerror=alert(document.domain)>' and open /problems/<problem-id>.",
+      "fix_location": "apps/web/src/components/editor/problem-panel.tsx ProblemPanel line 121; apps/web/src/app/api/problems/scrape/route.ts around description persistence.",
+      "what_to_change": "Add a shared HTML sanitizer with a narrow allowlist and render only sanitized problem statements.",
+      "expected_result_after_fix": "The proof payload is removed or rendered inert and no alert runs.",
+      "test_gap": "No component or ingestion test covers hostile problem HTML.",
+      "validation_commands": [
+        "pnpm --filter @grindup/web lint",
+        "pnpm --filter @grindup/web build"
+      ],
+      "manual_user_test": {
+        "where_to_test": "A local problem page containing hostile problem HTML.",
+        "steps": [
+          "Insert the proof payload in a problem description.",
+          "Open the problem page."
+        ],
+        "expected_result": "No script or event handler executes.",
+        "regression_checks": [
+          "Normal problem formatting still renders acceptably."
+        ]
+      },
+      "suggested_commit_message": "Fix unsafe problem description HTML rendering",
+      "worker_patch_note": "Agents/patches/VAL-001.md",
+      "specialist_eval_report": "Agents/patches/VAL-001-specialist-eval.md",
+      "supervisor_eval_report": "Agents/patches/VAL-001-eval.md",
+      "user_test_report": "Agents/patches/VAL-001-user-test.md",
+      "approval": {
+        "requires_user_approval": true,
+        "approved_by_user": false,
+        "approved_at": null
+      }
+    },
+    {
+      "id": "SEC-003",
+      "title": "Any authenticated user can delete global subjects and cascade other users' data",
+      "owner_agent": "security",
+      "owner_agent_name": "Security Agent - Paranoid Threat Hunter",
+      "worker_personality": "Security Worker - Paranoid Threat Hunter",
+      "source_report": "Agents/plan/01-security.md",
+      "specialist_eval_required": true,
+      "severity": "High",
+      "confidence": "High",
+      "priority_order": 3,
+      "status": "needs_user_test",
+      "files_involved": [
+        "apps/web/src/app/api/subjects/delete/route.ts"
+      ],
+      "root_cause": "The delete route deletes global Subject rows after only checking authentication.",
+      "where_it_fails": "POST /api/subjects/delete",
+      "current_behavior": "A regular authenticated user can delete global subject data.",
+      "expected_behavior": "Regular users only unenroll themselves or require ownership/admin rights for destructive deletes.",
+      "proof_example": "curl -i -X POST http://localhost:3000/api/subjects/delete -H 'Cookie: <session>' -H 'Content-Type: application/json' --data '{\"subjectId\":\"<other-subject-id>\"}'",
+      "fix_location": "apps/web/src/app/api/subjects/delete/route.ts POST around lines 14-23.",
+      "what_to_change": "Scope the action to the current user's UserSubject row or add explicit owner/admin authorization.",
+      "expected_result_after_fix": "The proof request cannot delete global subject rows or other users' enrollments.",
+      "test_gap": "No multi-user subject deletion authorization test exists.",
+      "validation_commands": [
+        "pnpm --filter @grindup/web lint"
+      ],
+      "manual_user_test": {
+        "where_to_test": "Subject removal flow.",
+        "steps": [
+          "Try removing a subject as one authenticated user.",
+          "Check another user's enrollment."
+        ],
+        "expected_result": "Only the caller's enrollment changes.",
+        "regression_checks": [
+          "Subject list still updates for the caller."
+        ]
+      },
+      "suggested_commit_message": "Prevent unauthorized subject deletion",
+      "worker_patch_note": "Agents/patches/SEC-003.md",
+      "specialist_eval_report": "Agents/patches/SEC-003-specialist-eval.md",
+      "supervisor_eval_report": "Agents/patches/SEC-003-eval.md",
+      "user_test_report": "Agents/patches/SEC-003-user-test.md",
+      "approval": {
+        "requires_user_approval": true,
+        "approved_by_user": false,
+        "approved_at": null
+      }
+    },
+    {
+      "id": "SEC-004",
+      "title": "Contest and lobby chat APIs allow non-participant read/write and leak emails",
+      "owner_agent": "security",
+      "owner_agent_name": "Security Agent - Paranoid Threat Hunter",
+      "worker_personality": "Security Worker - Paranoid Threat Hunter",
+      "source_report": "Agents/plan/01-security.md",
+      "specialist_eval_required": true,
+      "severity": "High",
+      "confidence": "High",
+      "priority_order": 4,
+      "status": "needs_user_test",
+      "files_involved": [
+        "apps/web/src/app/api/contests/[contestId]/messages/route.ts",
+        "apps/web/src/app/api/contests/lobbies/[lobbyId]/messages/route.ts"
+      ],
+      "root_cause": "Message routes check login but not contest or lobby participation, and select sender emails.",
+      "where_it_fails": "Contest and lobby message GET/POST handlers.",
+      "current_behavior": "Authenticated nonparticipants can read or post messages and see emails.",
+      "expected_behavior": "Only participants can read/write chat, and responses omit email.",
+      "proof_example": "curl -i http://localhost:3000/api/contests/lobbies/<private-lobby-id>/messages -H 'Cookie: <nonparticipant-session>'",
+      "fix_location": "Both contest/lobby message route files, GET and POST handlers.",
+      "what_to_change": "Require participant or owner membership before query/create and remove email from selected user fields.",
+      "expected_result_after_fix": "Nonparticipant requests return 403 and authorized responses omit email.",
+      "test_gap": "No participant-scoping route tests exist.",
+      "validation_commands": [
+        "pnpm --filter @grindup/web lint"
+      ],
+      "manual_user_test": {
+        "where_to_test": "Contest and lobby chat.",
+        "steps": [
+          "Use a nonparticipant session to call a private chat endpoint.",
+          "Use a participant session to open chat."
+        ],
+        "expected_result": "Nonparticipant fails with 403; participant succeeds without email fields.",
+        "regression_checks": [
+          "Posting chat as a participant still works."
+        ]
+      },
+      "suggested_commit_message": "Authorize contest chat access",
+      "worker_patch_note": "Agents/patches/SEC-004.md",
+      "specialist_eval_report": "Agents/patches/SEC-004-specialist-eval.md",
+      "supervisor_eval_report": "Agents/patches/SEC-004-eval.md",
+      "user_test_report": "Agents/patches/SEC-004-user-test.md",
+      "approval": {
+        "requires_user_approval": true,
+        "approved_by_user": false,
+        "approved_at": null
+      }
+    },
+    {
+      "id": "SEC-002",
+      "title": "Public problem scrape route mutates data, spends AI quota, and returns stack traces",
+      "owner_agent": "security",
+      "owner_agent_name": "Security Agent - Paranoid Threat Hunter",
+      "worker_personality": "Security Worker - Paranoid Threat Hunter",
+      "source_report": "Agents/plan/01-security.md",
+      "specialist_eval_required": true,
+      "severity": "High",
+      "confidence": "High",
+      "priority_order": 5,
+      "status": "needs_user_test",
+      "files_involved": [
+        "apps/web/src/app/api/problems/scrape/route.ts"
+      ],
+      "root_cause": "The scrape route has no admin/session or cron secret gate and returns error stacks.",
+      "where_it_fails": "POST /api/problems/scrape",
+      "current_behavior": "Public callers can trigger external calls and data writes.",
+      "expected_behavior": "Only a trusted admin/job can run scrape and errors are generic.",
+      "proof_example": "curl -i -X POST http://localhost:3000/api/problems/scrape",
+      "fix_location": "apps/web/src/app/api/problems/scrape/route.ts POST around lines 175-179 and catch block around lines 345-351.",
+      "what_to_change": "Add admin or job-secret authorization before work starts and hide stack traces in responses.",
+      "expected_result_after_fix": "Unauthenticated proof returns 401/403 and no external work starts.",
+      "test_gap": "No scrape route auth or safe-error tests exist.",
+      "validation_commands": [
+        "pnpm --filter @grindup/web lint"
+      ],
+      "manual_user_test": {
+        "where_to_test": "POST /api/problems/scrape",
+        "steps": [
+          "Call without credentials: curl -i -X POST http://localhost:3000/api/problems/scrape.",
+          "Confirm the unauthorized response is 401 or 403 and scraper work does not start.",
+          "Set PROBLEM_SCRAPE_SECRET locally and call with Authorization: Bearer <secret>.",
+          "Confirm the authorized request passes the auth gate and proceeds to the scrape path.",
+          "Confirm error responses, if any, do not contain stack traces."
+        ],
+        "expected_result": "Unauthorized calls fail before scraper work starts; authorized Bearer calls proceed; error bodies stay generic.",
+        "regression_checks": [
+          "Response does not include stack traces.",
+          "Unset PROBLEM_SCRAPE_SECRET fails closed.",
+          "Successful authorized scrape responses keep success, count, and message fields."
+        ]
+      },
+      "suggested_commit_message": "Protect problem scraper endpoint",
+      "worker_patch_note": "Agents/patches/SEC-002.md",
+      "specialist_eval_report": "Agents/patches/SEC-002-specialist-eval.md",
+      "supervisor_eval_report": "Agents/patches/SEC-002-eval.md",
+      "user_test_report": "Agents/patches/SEC-002-user-test.md",
+      "approval": {
+        "requires_user_approval": true,
+        "approved_by_user": false,
+        "approved_at": null
+      }
+    },
+    {
+      "id": "REL-001",
+      "title": "Timed-out runner containers are killed but never removed",
+      "owner_agent": "reliability",
+      "owner_agent_name": "Reliability Agent - Production SRE",
+      "worker_personality": "Reliability Worker - Production SRE",
+      "source_report": "Agents/plan/04-reliability.md",
+      "specialist_eval_required": true,
+      "severity": "High",
+      "confidence": "High",
+      "priority_order": 6,
+      "status": "needs_user_test",
+      "files_involved": [
+        "apps/runner/services/docker_service.py"
+      ],
+      "root_cause": "Timeout path kills and returns before remove() is reached.",
+      "where_it_fails": "DockerService.run_code timeout branch.",
+      "current_behavior": "Exited executor containers accumulate after TLE.",
+      "expected_behavior": "Execution containers are removed on success, error, and timeout.",
+      "proof_example": "Submit an infinite loop with time_limit_ms=100 then run docker ps -a --filter ancestor=grindup-executor --filter status=exited.",
+      "fix_location": "apps/runner/services/docker_service.py DockerService.run_code around lines 44-84.",
+      "what_to_change": "Move container removal into a finally using remove(force=True).",
+      "expected_result_after_fix": "The proof does not show new leftover containers.",
+      "test_gap": "No runner timeout cleanup test exists.",
+      "validation_commands": [
+        "python3 -m py_compile apps/runner/services/docker_service.py"
+      ],
+      "manual_user_test": {
+        "where_to_test": "Runner execute endpoint.",
+        "steps": [
+          "Submit an infinite loop with a tiny time limit.",
+          "Inspect exited executor containers."
+        ],
+        "expected_result": "No new stopped executor container remains.",
+        "regression_checks": [
+          "Normal accepted and wrong-answer submissions still return results."
+        ]
+      },
+      "suggested_commit_message": "Fix runner container cleanup on timeout",
+      "worker_patch_note": "Agents/patches/REL-001.md",
+      "specialist_eval_report": "Agents/patches/REL-001-specialist-eval.md",
+      "supervisor_eval_report": "Agents/patches/REL-001-eval.md",
+      "user_test_report": "Agents/patches/REL-001-user-test.md",
+      "approval": {
+        "requires_user_approval": true,
+        "approved_by_user": false,
+        "approved_at": null
+      }
+    },
+    {
+      "id": "REL-002",
+      "title": "Runner execute handler blocks the event loop during Docker work",
+      "owner_agent": "reliability",
+      "owner_agent_name": "Reliability Agent - Production SRE",
+      "worker_personality": "Reliability Worker - Production SRE",
+      "source_report": "Agents/plan/04-reliability.md",
+      "specialist_eval_required": true,
+      "severity": "High",
+      "confidence": "High",
+      "priority_order": 7,
+      "status": "needs_user_test",
+      "files_involved": [
+        "apps/runner/main.py",
+        "apps/runner/services/docker_service.py"
+      ],
+      "root_cause": "An async FastAPI handler directly runs synchronous Docker SDK work and polling.",
+      "where_it_fails": "apps/runner/main.py execute_code.",
+      "current_behavior": "One execution can delay health checks and concurrent requests.",
+      "expected_behavior": "Docker work runs off the event loop.",
+      "proof_example": "Start a slow /execute request then immediately run time curl -s http://localhost:8080/health.",
+      "fix_location": "apps/runner/main.py execute_code around lines 96-103.",
+      "what_to_change": "Use run_in_threadpool or make the route sync so FastAPI offloads Docker work.",
+      "expected_result_after_fix": "/health responds quickly while execution is running.",
+      "test_gap": "No runner concurrency test exists.",
+      "validation_commands": [
+        "python3 -m py_compile apps/runner/main.py"
+      ],
+      "manual_user_test": {
+        "where_to_test": "Runner /execute and /health.",
+        "steps": [
+          "Run a long execution.",
+          "Call /health while it runs."
+        ],
+        "expected_result": "/health returns quickly.",
+        "regression_checks": [
+          "Execution response shape is unchanged."
+        ]
+      },
+      "suggested_commit_message": "Move runner Docker execution off the event loop",
+      "worker_patch_note": "Agents/patches/REL-002.md",
+      "specialist_eval_report": "Agents/patches/REL-002-specialist-eval.md",
+      "supervisor_eval_report": "Agents/patches/REL-002-eval.md",
+      "user_test_report": "Agents/patches/REL-002-user-test.md",
+      "approval": {
+        "requires_user_approval": true,
+        "approved_by_user": false,
+        "approved_at": null
+      }
+    },
+    {
+      "id": "DB-003",
+      "title": "Submission queue claim can hand one job to concurrent workers",
+      "owner_agent": "database",
+      "owner_agent_name": "Database Agent - Data Integrity Engineer",
+      "worker_personality": "Database Worker - Data Integrity Engineer",
+      "source_report": "Agents/plan/03-database.md",
+      "specialist_eval_required": true,
+      "severity": "High",
+      "confidence": "High",
+      "priority_order": 8,
+      "status": "needs_user_test",
+      "files_involved": [
+        "apps/web/src/lib/submission-queue.ts"
+      ],
+      "root_cause": "getNextJob reads then updates a queued job without an atomic claim predicate or row lock.",
+      "where_it_fails": "Concurrent getNextJob calls.",
+      "current_behavior": "Two workers can receive the same job.",
+      "expected_behavior": "Exactly one worker claims one queued job.",
+      "proof_example": "Run Promise.all([getNextJob(), getNextJob()]) after queueing one job and compare returned ids.",
+      "fix_location": "apps/web/src/lib/submission-queue.ts getNextJob lines 50-74.",
+      "what_to_change": "Use an atomic claim operation with FOR UPDATE SKIP LOCKED or an updateMany claim predicate plus retry.",
+      "expected_result_after_fix": "Only one worker receives the queued job.",
+      "test_gap": "No queue concurrency test exists.",
+      "validation_commands": [
+        "pnpm --filter @grindup/web lint"
+      ],
+      "manual_user_test": {
+        "where_to_test": "Submission queue helper.",
+        "steps": [
+          "Queue one job.",
+          "Run two claim calls concurrently."
+        ],
+        "expected_result": "Only one claim returns the queued job id.",
+        "regression_checks": [
+          "Single-worker claims still work."
+        ]
+      },
+      "suggested_commit_message": "Make submission job claims atomic",
+      "worker_patch_note": "Agents/patches/DB-003.md",
+      "specialist_eval_report": "Agents/patches/DB-003-specialist-eval.md",
+      "supervisor_eval_report": "Agents/patches/DB-003-eval.md",
+      "user_test_report": "Agents/patches/DB-003-user-test.md",
+      "approval": {
+        "requires_user_approval": true,
+        "approved_by_user": false,
+        "approved_at": null
+      }
+    },
+    {
+      "id": "COMPAT-001",
+      "title": "Shared submission contract does not match the execute APIs",
+      "owner_agent": "compatibility",
+      "owner_agent_name": "Clean Code and Compatibility Agent - Minimalist Maintainer",
+      "worker_personality": "Compatibility Worker - Minimalist Maintainer",
+      "source_report": "Agents/plan/06-clean-code-compatibility.md",
+      "specialist_eval_required": true,
+      "severity": "High",
+      "confidence": "High",
+      "priority_order": 9,
+      "status": "needs_user_test",
+      "files_involved": [
+        "packages/shared/src/types.ts",
+        "packages/shared/src/constants.ts",
+        "apps/web/src/app/api/execute/route.ts"
+      ],
+      "root_cause": "Shared execution types use camelCase and advertise csharp while live APIs use snake_case and runner supports fewer languages.",
+      "where_it_fails": "Clients typed against @grindup/shared can send payloads the web route rejects.",
+      "current_behavior": "A shared SubmissionRequest-shaped payload returns missing fields.",
+      "expected_behavior": "Shared contracts match accepted JSON and supported languages.",
+      "proof_example": "curl -i -X POST http://localhost:3000/api/execute -H 'Content-Type: application/json' --data '{\"code\":\"def solution(): return 1\",\"language\":\"python\",\"problemId\":\"any\",\"testCases\":[],\"timeLimitMs\":2000,\"memoryLimitKb\":256000}'",
+      "fix_location": "packages/shared/src/types.ts, packages/shared/src/constants.ts, and apps/web/src/app/api/execute/route.ts.",
+      "what_to_change": "Align shared types with canonical web API shape or accept both shapes through a compatibility adapter and remove csharp until supported.",
+      "expected_result_after_fix": "Payload shape fails only for domain reasons, not shared-contract field mismatch.",
+      "test_gap": "No execution contract test exists.",
+      "validation_commands": [
+        "pnpm --filter @grindup/shared lint",
+        "pnpm --filter @grindup/web exec tsc --noEmit --pretty false"
+      ],
+      "manual_user_test": {
+        "where_to_test": "Shared execution types, POST /api/execute, and the problem editor execution flow.",
+        "steps": [
+          "Run shared lint and the web typecheck.",
+          "Confirm TypeScript rejects csharp and the old camelCase SubmissionRequest shape.",
+          "Run editor execution while logged in.",
+          "Optionally post an authenticated snake_case payload to /api/execute."
+        ],
+        "expected_result": "Old shared-contract payloads fail at compile time, supported snake_case payloads are handled without Missing required fields, and editor execution still works.",
+        "regression_checks": [
+          "Existing UI payload still uses snake_case.",
+          "The editor language picker still offers Python, JavaScript, Java, and C++."
+        ]
+      },
+      "suggested_commit_message": "Align shared execution contract with runner API",
+      "worker_patch_note": "Agents/patches/COMPAT-001.md",
+      "specialist_eval_report": "Agents/patches/COMPAT-001-specialist-eval.md",
+      "supervisor_eval_report": "Agents/patches/COMPAT-001-eval.md",
+      "user_test_report": "Agents/patches/COMPAT-001-user-test.md",
+      "approval": {
+        "requires_user_approval": true,
+        "approved_by_user": false,
+        "approved_at": null
+      }
+    },
+    {
+      "id": "VAL-003",
+      "title": "Multipart uploads are buffered before file limits are enforced",
+      "owner_agent": "validation",
+      "owner_agent_name": "Validation and Sanitisation Agent - Input Gatekeeper",
+      "worker_personality": "Validation Worker - Input Gatekeeper",
+      "source_report": "Agents/plan/02-validation-sanitisation.md",
+      "specialist_eval_required": true,
+      "severity": "Medium",
+      "confidence": "High",
+      "priority_order": 10,
+      "status": "needs_user_test",
+      "files_involved": [
+        "apps/web/src/app/api/import/route.ts",
+        "apps/web/src/app/api/homework/submit/route.ts"
+      ],
+      "root_cause": "Upload handlers call arrayBuffer before checking size and type limits.",
+      "where_it_fails": "Import and homework multipart handlers.",
+      "current_behavior": "Large uploads can be buffered and processed before rejection.",
+      "expected_behavior": "Oversized or unsupported files are rejected before full buffering and extraction.",
+      "proof_example": "dd if=/dev/zero of=/tmp/big.bin bs=1m count=200 then submit it as file to /api/import or /api/homework/submit.",
+      "fix_location": "apps/web/src/app/api/import/route.ts and apps/web/src/app/api/homework/submit/route.ts before extraction helpers.",
+      "what_to_change": "Check file.size, extension, and MIME before arrayBuffer, cap extracted text, and reject unsupported files.",
+      "expected_result_after_fix": "The proof upload returns 413 or 400 before parser/OpenAI/database work.",
+      "test_gap": "No multipart oversized file tests exist.",
+      "validation_commands": [
+        "pnpm --filter @grindup/web exec eslint src/app/api/import/route.ts src/app/api/homework/submit/route.ts",
+        "pnpm --filter @grindup/web exec tsc --noEmit --pretty false",
+        "python3 -m json.tool Agents/stat.json >/dev/null"
+      ],
+      "manual_user_test": {
+        "where_to_test": "Import and homework upload forms.",
+        "steps": [
+          "Upload a file over the configured limit.",
+          "Upload a normal allowed file."
+        ],
+        "expected_result": "Oversized file is rejected early; normal file still works.",
+        "regression_checks": [
+          "Accepted file types remain documented and functional."
+        ]
+      },
+      "suggested_commit_message": "Reject oversized uploads before buffering",
+      "worker_patch_note": "Agents/patches/VAL-003.md",
+      "specialist_eval_report": "Agents/patches/VAL-003-specialist-eval.md",
+      "supervisor_eval_report": "Agents/patches/VAL-003-eval.md",
+      "user_test_report": "Agents/patches/VAL-003-user-test.md",
+      "approval": {
+        "requires_user_approval": true,
+        "approved_by_user": false,
+        "approved_at": null
+      }
+    },
+    {
+      "id": "REL-005",
+      "title": "Compose runner launches executor containers without shared execution files",
+      "owner_agent": "reliability",
+      "owner_agent_name": "Reliability Agent - Production SRE",
+      "worker_personality": "Reliability Worker - Production SRE",
+      "source_report": "Agents/final-review/04-reliability.md",
+      "specialist_eval_required": true,
+      "severity": "High",
+      "confidence": "High",
+      "priority_order": 11,
+      "status": "needs_user_test",
+      "files_involved": [
+        "compose.yml",
+        "apps/runner/services/docker_service.py",
+        "apps/runner/Dockerfile"
+      ],
+      "root_cause": "The compose runner creates execution files in a temp directory inside the runner container, then asks the host Docker daemon to bind-mount that container-internal path into a sibling executor container.",
+      "where_it_fails": "Compose runner POST /execute launches an executor that cannot see /app/main.py.",
+      "current_behavior": "The runner health check can pass, but real code execution through compose returns python3: can't open file '/app/main.py'.",
+      "expected_behavior": "Compose /execute should make generated source files visible inside the executor container and return normal test results.",
+      "proof_example": "curl -sS -i -m 15 -X POST http://127.0.0.1:8080/execute -H 'Content-Type: application/json' -H 'X-Runner-Token: dev-only-runner-secret' --data '{\"code\":\"def solution(x):\\n    return x\",\"language\":\"python\",\"test_cases\":[{\"id\":\"t1\",\"input\":\"x = 1\",\"expected_output\":\"1\",\"is_hidden\":false}],\"time_limit_ms\":2000,\"memory_limit_kb\":256000}'",
+      "fix_location": "compose.yml runner service volumes/environment around lines 80-86; apps/runner/services/docker_service.py DockerService.run_code around lines 23-50.",
+      "what_to_change": "Use a host-visible execution work directory shared with the runner container, or use Docker volumes/archive-copy so executor input files are visible to sibling containers.",
+      "expected_result_after_fix": "The proof curl returns status:\"accepted\" with one passing test result instead of an error opening /app/main.py.",
+      "test_gap": "No compose smoke test calls runner /execute and asserts a simple accepted result.",
+      "validation_commands": [
+        "docker compose config",
+        "python3 -m py_compile apps/runner/services/docker_service.py apps/runner/main.py",
+        "curl -sS -i -m 15 -X POST http://127.0.0.1:8080/execute -H 'Content-Type: application/json' -H 'X-Runner-Token: dev-only-runner-secret' --data '{\"code\":\"def solution(x):\\n    return x\",\"language\":\"python\",\"test_cases\":[{\"id\":\"t1\",\"input\":\"x = 1\",\"expected_output\":\"1\",\"is_hidden\":false}],\"time_limit_ms\":2000,\"memory_limit_kb\":256000}'"
+      ],
+      "manual_user_test": {
+        "where_to_test": "Docker compose runner /execute endpoint at http://127.0.0.1:8080/execute.",
+        "steps": [
+          "Run docker compose up --build -d runner or the full stack equivalent.",
+          "Check runner health with curl -sS -i -m 5 http://127.0.0.1:8080/health.",
+          "Run the proof curl with X-Runner-Token: dev-only-runner-secret.",
+          "Verify the response reports status:\"accepted\" with visible test t1 passing.",
+          "Verify missing-token and bad-token requests are rejected.",
+          "Verify no grindup_run_* temp dirs remain under /tmp/grindup-runner-work after completion."
+        ],
+        "expected_result": "Runner health returns HTTP 200 healthy, the proof curl returns status:\"accepted\" with visible test t1 passing, missing/bad tokens are rejected, and no temp dirs are left under /tmp/grindup-runner-work.",
+        "regression_checks": [
+          "Runner /health remains healthy.",
+          "Direct token checks from SEC-001 still reject missing or bad tokens.",
+          "Timeout cleanup from REL-001 still removes executor containers and execution temp directories."
+        ]
+      },
+      "suggested_commit_message": "Fix compose runner executor file mounts",
+      "worker_patch_note": "Agents/patches/REL-005.md",
+      "specialist_eval_report": "Agents/patches/REL-005-specialist-eval.md",
+      "supervisor_eval_report": "Agents/patches/REL-005-eval.md",
+      "user_test_report": "Agents/patches/REL-005-user-test.md",
+      "approval": {
+        "requires_user_approval": true,
+        "approved_by_user": false,
+        "approved_at": null
+      }
+    },
+    {
+      "id": "PERF-005",
+      "title": "Runner offload can fan out unbounded Docker containers",
+      "owner_agent": "performance",
+      "owner_agent_name": "Performance Agent - Latency Hawk",
+      "worker_personality": "Performance Worker - Latency Hawk",
+      "source_report": "Agents/final-review/05-performance.md",
+      "specialist_eval_required": true,
+      "severity": "High",
+      "confidence": "High",
+      "priority_order": 12,
+      "status": "needs_user_test",
+      "files_involved": [
+        "apps/runner/main.py",
+        "apps/runner/services/docker_service.py",
+        "compose.yml"
+      ],
+      "root_cause": "The event-loop fix offloads Docker execution into Starlette threadpool workers, but no runner-local concurrency limiter exists before containers.run.",
+      "where_it_fails": "Bursts of authenticated runner /execute requests can start many executor containers in parallel.",
+      "current_behavior": "Each accepted request can enter run_in_threadpool and create a Docker container without a configured cap.",
+      "expected_behavior": "The runner enforces a documented maximum number of concurrent executor containers and rejects or queues excess work predictably.",
+      "proof_example": "Start the compose stack, send 40 valid POST /execute requests with X-Runner-Token in parallel, then run docker ps --filter ancestor=grindup-executor:latest; many executor containers can be active at once.",
+      "fix_location": "apps/runner/main.py execute_code around lines 95-130; optionally compose.yml runner environment around lines 80-84.",
+      "what_to_change": "Add a runner-level concurrency limiter around the run_in_threadpool call, backed by an env var such as RUNNER_MAX_CONCURRENT_EXECUTIONS; return 429/503 or wait within a bounded timeout when saturated.",
+      "expected_result_after_fix": "The parallel proof shows no more than the configured number of executor containers active, and excess requests get a clear backpressure response or bounded wait.",
+      "test_gap": "No runner concurrency/load test asserts max active executor containers or backpressure behavior.",
+      "validation_commands": [
+        "python3 -m py_compile apps/runner/main.py apps/runner/services/docker_service.py",
+        "docker compose config",
+        "Run a parallel /execute burst and verify active grindup-executor containers never exceed RUNNER_MAX_CONCURRENT_EXECUTIONS."
+      ],
+      "manual_user_test": {
+        "where_to_test": "Runner /execute under compose or a local runner connected to Docker.",
+        "steps": [
+          "Configure a small RUNNER_MAX_CONCURRENT_EXECUTIONS value.",
+          "Send a burst of valid /execute requests larger than that value.",
+          "Watch docker ps and response statuses."
+        ],
+        "expected_result": "Active executor containers never exceed the configured limit; overflow behavior is explicit and stable.",
+        "regression_checks": [
+          "A single editor execution still succeeds.",
+          "Health checks remain responsive during a burst.",
+          "REL-002 event-loop responsiveness remains improved."
+        ]
+      },
+      "suggested_commit_message": "Limit concurrent runner Docker executions",
+      "worker_patch_note": "Agents/patches/PERF-005.md",
+      "specialist_eval_report": "Agents/patches/PERF-005-specialist-eval.md",
+      "supervisor_eval_report": "Agents/patches/PERF-005-eval.md",
+      "user_test_report": "Agents/patches/PERF-005-user-test.md",
+      "approval": {
+        "requires_user_approval": true,
+        "approved_by_user": false,
+        "approved_at": null
+      }
+    },
+    {
+      "id": "COMPAT-004",
+      "title": "Runner README stale after runner token cleanup",
+      "owner_agent": "compatibility",
+      "owner_agent_name": "Clean Code and Compatibility Agent - Minimalist Maintainer",
+      "worker_personality": "Compatibility Worker - Minimalist Maintainer",
+      "source_report": "Agents/final-review/06-clean-code-compatibility.md",
+      "specialist_eval_required": true,
+      "severity": "Medium",
+      "confidence": "High",
+      "priority_order": 13,
+      "status": "needs_user_test",
+      "files_involved": [
+        "apps/runner/README.md",
+        "apps/runner/main.py",
+        "README.md",
+        "REVIEWER_RUN_GUIDE.md"
+      ],
+      "root_cause": "Root docs describe RUNNER_SHARED_SECRET and the runner enforces X-Runner-Token when configured, but the runner README still shows startup and /execute usage without the secret/header.",
+      "where_it_fails": "Reviewers following apps/runner/README.md can start an unprotected runner or send direct execute examples that fail under the root run guide.",
+      "current_behavior": "apps/runner/README.md documents python main.py without RUNNER_SHARED_SECRET and a bare POST /execute request body without X-Runner-Token.",
+      "expected_behavior": "All public run docs describe the same runner token contract.",
+      "proof_example": "rg -n \"RUNNER_SHARED_SECRET|X-Runner-Token|python main.py|POST /execute\" apps/runner/README.md README.md REVIEWER_RUN_GUIDE.md apps/runner/main.py",
+      "fix_location": "apps/runner/README.md setup and API sections around lines 25-52.",
+      "what_to_change": "Add export RUNNER_SHARED_SECRET=dev-only-runner-secret before python main.py, document the X-Runner-Token requirement, and include a compact curl example with the header.",
+      "expected_result_after_fix": "The proof command shows RUNNER_SHARED_SECRET and X-Runner-Token in the runner README, aligned with root docs and middleware.",
+      "test_gap": "No documentation smoke check or runner auth integration test asserts public runbook and runner middleware alignment.",
+      "validation_commands": [
+        "rg -n \"RUNNER_SHARED_SECRET|X-Runner-Token|python main.py|POST /execute\" apps/runner/README.md README.md REVIEWER_RUN_GUIDE.md apps/runner/main.py"
+      ],
+      "manual_user_test": {
+        "where_to_test": "Runner local setup documentation.",
+        "steps": [
+          "Follow apps/runner/README.md to start the runner with RUNNER_SHARED_SECRET.",
+          "Run its documented /execute curl example.",
+          "Compare with README.md and REVIEWER_RUN_GUIDE.md instructions."
+        ],
+        "expected_result": "All docs use the same token setup and the direct runner request succeeds when the header matches.",
+        "regression_checks": [
+          "Docs do not include real secrets.",
+          "Root reviewer guide still validates.",
+          "SEC-001 token enforcement remains documented."
+        ]
+      },
+      "suggested_commit_message": "Document runner token setup consistently",
+      "worker_patch_note": "Agents/patches/COMPAT-004.md",
+      "specialist_eval_report": "Agents/patches/COMPAT-004-specialist-eval.md",
+      "supervisor_eval_report": "Agents/patches/COMPAT-004-eval.md",
+      "user_test_report": "Agents/patches/COMPAT-004-user-test.md",
+      "approval": {
+        "requires_user_approval": true,
+        "approved_by_user": false,
+        "approved_at": null
+      }
+    },
+    {
+      "id": "SEC-FR-001",
+      "title": "Execute route returns raw internal errors to authenticated callers",
+      "owner_agent": "security",
+      "owner_agent_name": "Security Agent - Paranoid Threat Hunter",
+      "worker_personality": "Security Worker - Paranoid Threat Hunter",
+      "source_report": "Agents/final-review/01-security.md",
+      "specialist_eval_required": true,
+      "severity": "Low",
+      "confidence": "High",
+      "priority_order": 14,
+      "status": "needs_user_test",
+      "files_involved": [
+        "apps/web/src/app/api/execute/route.ts"
+      ],
+      "root_cause": "The outer POST /api/execute catch block sends error.message and String(error) back to clients.",
+      "where_it_fails": "Authenticated callers who trigger internal execute-route exceptions can receive implementation details in 500 responses.",
+      "current_behavior": "The route can return a 500 body containing raw exception message and details.",
+      "expected_behavior": "Clients receive a generic execution error while full details stay in server logs.",
+      "proof_example": "curl -i -X POST http://localhost:3000/api/execute -H 'Cookie: <authenticated-session>' -H 'Content-Type: application/json' --data '{\"code\":\"x\",\"language\":\"python\",\"problem_id\":{\"not\":\"a-string\"},\"test_cases\":[]}'",
+      "fix_location": "apps/web/src/app/api/execute/route.ts outer catch in POST, lines 292-297.",
+      "what_to_change": "Keep server-side logging, but return a generic body such as { error: \"Internal server error\", status: \"error\" } without error.message, error.stack, or String(error).",
+      "expected_result_after_fix": "The proof still returns 500, but the body contains only a generic error and no Prisma/framework/internal details.",
+      "test_gap": "No execute-route test asserts internal exceptions are sanitized before reaching API clients.",
+      "validation_commands": [
+        "pnpm --filter @grindup/web exec eslint src/app/api/execute/route.ts",
+        "Run the proof request with an authenticated session and verify no raw internal error details are returned."
+      ],
+      "manual_user_test": {
+        "where_to_test": "POST /api/execute with an authenticated session.",
+        "steps": [
+          "Send the malformed authenticated proof request.",
+          "Inspect the response body.",
+          "Run a normal authenticated editor execution."
+        ],
+        "expected_result": "Malformed requests do not expose raw internal details; normal execution still returns its expected result shape.",
+        "regression_checks": [
+          "Server logs still include enough detail for debugging.",
+          "Unauthenticated requests still return 401 before body parsing.",
+          "Runner error messages for user code remain useful where intentionally exposed."
+        ]
+      },
+      "suggested_commit_message": "Sanitize execute API error responses",
+      "worker_patch_note": "Agents/patches/SEC-FR-001.md",
+      "specialist_eval_report": "Agents/patches/SEC-FR-001-specialist-eval.md",
+      "supervisor_eval_report": "Agents/patches/SEC-FR-001-eval.md",
+      "user_test_report": "Agents/patches/SEC-FR-001-user-test.md",
+      "approval": {
+        "requires_user_approval": true,
+        "approved_by_user": false,
+        "approved_at": null
+      }
+    },
+    {
+      "id": "TRI-001",
+      "title": "Audit workspace state summaries stale",
+      "owner_agent": "triage",
+      "owner_agent_name": "Triage Agent - Repo Cartographer",
+      "worker_personality": "Triage Worker - Repo Cartographer",
+      "source_report": "Agents/final-review/00-triage.md",
+      "specialist_eval_required": true,
+      "severity": "Low",
+      "confidence": "High",
+      "priority_order": 15,
+      "status": "implemented",
+      "files_involved": [
+        "Agents/README.md",
+        "Agents/stat.json"
+      ],
+      "root_cause": "Workspace summary metadata fell behind the detailed task state after additional tasks reached needs_user_test.",
+      "where_it_fails": "Agents/README.md current workflow stage and Agents/stat.json.workflow.stage.",
+      "current_behavior": "Before this worker update, the README still described 10 existing tasks awaiting user testing and 5 queued follow-up findings, while the detailed task state showed 14 tasks in needs_user_test and TRI-001 as the only queued task.",
+      "expected_behavior": "Workspace summaries reflect 14 tasks awaiting user approval, TRI-001 implemented by the worker patch, final review completion, no approved tasks, and no queued or remaining tasks.",
+      "proof_example": "sed -n '1,12p' Agents/README.md && python3 -m json.tool Agents/stat.json | sed -n '1,60p'",
+      "fix_location": "Agents/README.md current workflow stage; Agents/stat.json.workflow.stage.",
+      "what_to_change": "Update workspace metadata to final_review_complete and summarize 14 needs_user_test tasks, TRI-001 implemented, no approvals, and zero queued or remaining tasks.",
+      "expected_result_after_fix": "The proof commands show consistent workflow status across README and JSON state.",
+      "test_gap": "No artifact consistency check exists for review-skill workspace metadata.",
+      "validation_commands": [
+        "python3 -m json.tool Agents/stat.json >/dev/null",
+        "sed -n \"1,20p\" Agents/README.md"
+      ],
+      "manual_user_test": {
+        "where_to_test": "Audit workspace metadata only.",
+        "steps": [
+          "Open Agents/README.md.",
+          "Inspect Agents/stat.json summary counts and workflow stage."
+        ],
+        "expected_result": "Both files agree that final review is complete, 14 tasks await user testing, TRI-001 is implemented, no tasks are approved, and no tasks are queued or remaining.",
+        "regression_checks": [
+          "Existing task statuses remain needs_user_test.",
+          "Existing approval.approved_by_user values remain false.",
+          "TRI-001 has a worker patch note and still has empty specialist, supervisor, and user-test report fields until those later workflow steps run."
+        ]
+      },
+      "suggested_commit_message": "Update review workspace status summaries",
+      "worker_patch_note": "Agents/patches/TRI-001.md",
+      "specialist_eval_report": "Agents/patches/TRI-001-specialist-eval.md",
+      "supervisor_eval_report": "",
+      "user_test_report": "",
+      "approval": {
+        "requires_user_approval": true,
+        "approved_by_user": false,
+        "approved_at": null
+      }
+    }
+  ]
+}

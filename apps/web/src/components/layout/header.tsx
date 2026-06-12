@@ -83,7 +83,7 @@ export function Header({ user, userStats, isLoggedIn, displayName, displayInitia
     const safeUserStats = userStats || { streak: 0, xp: 0, level: 0 };
 
     const handleSignOut = async () => {
-        await signOut({ callbackUrl: '/signin' });
+        await signOut({ callbackUrl: '/login' });
     };
 
     return (
