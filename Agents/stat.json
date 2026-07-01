@@ -31,8 +31,8 @@
     "medium": 2,
     "low": 2,
     "queued": 0,
-    "implemented": 1,
-    "needs_user_test": 14,
+    "implemented": 0,
+    "needs_user_test": 15,
     "approved": 0,
     "committed_by_user": 0,
     "remaining": 0
@@ -790,7 +790,7 @@
       "severity": "Low",
       "confidence": "High",
       "priority_order": 15,
-      "status": "implemented",
+      "status": "needs_user_test",
       "files_involved": [
         "Agents/README.md",
         "Agents/stat.json"
@@ -824,8 +824,8 @@
       "suggested_commit_message": "Update review workspace status summaries",
       "worker_patch_note": "Agents/patches/TRI-001.md",
       "specialist_eval_report": "Agents/patches/TRI-001-specialist-eval.md",
-      "supervisor_eval_report": "",
-      "user_test_report": "",
+      "supervisor_eval_report": "Agents/patches/TRI-001-eval.md",
+      "user_test_report": "Agents/patches/TRI-001-user-test.md",
       "approval": {
         "requires_user_approval": true,
         "approved_by_user": false,

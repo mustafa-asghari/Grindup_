@@ -2,7 +2,7 @@
 
 ## Current workflow stage
 
-`final_review_complete`; 14 tasks are `needs_user_test` pending manual user approval, and no tasks are approved. The metadata follow-up `TRI-001` is implemented by this worker patch, leaving no queued or remaining tasks.
+`final_review_complete`; all 15 tasks are `needs_user_test` pending manual user approval, and no tasks are approved. There are no queued or remaining tasks.
 
 ## Skill being used
 
